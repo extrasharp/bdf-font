@@ -1,7 +1,6 @@
 bdf-font
 
 rust BDF font library
-based heavily off of https://github.com/meh/rust-bdf
 documentation for the BDF format can be found at https://www.adobe.com/content/dam/acom/en/devnet/font/pdfs/5005.BDF_Spec.pdf
 
 MIT
