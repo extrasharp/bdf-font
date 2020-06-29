@@ -19,7 +19,7 @@ fn main() {
     stream.write(Entry::StartFont(String::from("2.2"))).unwrap();
     stream.write(Entry::Comment(String::from("comment"))).unwrap();
     stream.write(Entry::Comment(String::from("comment2"))).unwrap();
-    stream.write(Entry::ScalableWidth(10, 15)).unwrap();
+    stream.write(Entry::ScalableWidth((10, 15))).unwrap();
     stream.write(Entry::Bitmap(bmp)).unwrap();
     stream.flush().unwrap();
 

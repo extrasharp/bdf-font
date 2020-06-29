@@ -1,6 +1,3 @@
-use std::{
-    collections::HashMap,
-};
 use bit_vec::BitVec;
 
 //
@@ -124,13 +121,19 @@ pub struct FontSize {
     pub y_dpi: u16,
 }
 
-pub enum Property {
+#[derive(Clone)]
+pub enum PropertyValue {
     Str(String),
     Int(i32),
 }
 
+#[derive(Clone)]
+pub struct Property {
+    pub name: String,
+    pub value: PropertyValue,
+}
+
 // #[derive(Debug)]
-// TODO comments
 pub struct Font {
     pub bdf_version: String,
     pub name: String,
@@ -138,8 +141,9 @@ pub struct Font {
     pub bounding_box: BoundingBox,
     pub metrics: WritingMetrics,
 
-    pub properties: HashMap<String, Property>,
-    pub glyphs: HashMap<char, Glyph>,
+    pub comments: Vec<String>,
+    pub properties: Vec<Property>,
+    pub glyphs: Vec<Glyph>,
 
     pub content_version: Option<String>,
     pub scalable_width: Option<(u32, u32)>,
@@ -158,8 +162,9 @@ impl Font {
             bounding_box,
             metrics: WritingMetrics::Normal,
 
-            properties: HashMap::new(),
-            glyphs: HashMap::new(),
+            comments: Vec::new(),
+            properties: Vec::new(),
+            glyphs: Vec::new(),
 
             content_version: None,
             scalable_width: None,
