@@ -23,8 +23,7 @@ impl<T: Write> Writer<T> {
     }
 
     pub fn write(&mut self, entry: Entry) -> io::Result<()> {
-        self.0.write(String::from(entry).as_bytes())?;
-        self.0.write("\n".as_bytes())?;
+        self.0.write(entry.to_string().as_bytes())?;
         Ok(())
     }
 

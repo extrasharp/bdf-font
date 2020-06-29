@@ -1,3 +1,10 @@
+use std::fmt::{
+    self,
+    Write,
+};
+
+//
+
 use crate::{
     bdf::{
         self,
@@ -5,8 +12,8 @@ use crate::{
         Property,
         WritingMetrics,
         FontSize,
+        Bitmap,
     },
-    bitmap::Bitmap,
 };
 
 // #[derive(PartialEq, Eq, Clone, Debug)]
@@ -19,11 +26,9 @@ pub enum Entry {
     Chars(usize),
     FontBoundingBox(BoundingBox),
     EndFont,
-
     StartProperties(usize),
     Property(String, Property),
     EndProperties,
-
     StartChar(String),
     Encoding(char),
     MetricsSet(WritingMetrics),
@@ -37,55 +42,64 @@ pub enum Entry {
     EndChar,
 }
 
-impl From<Entry> for String {
-    fn from(entry: Entry) -> Self {
+impl fmt::Display for Entry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Entry::*;
 
-        match entry {
-            StartFont(s) => format!("STARTFONT {}", s),
-            Comment(s) => format!("COMMENT {}", s),
-            ContentVersion(s) => format!("CONTENTVERSION {}", s),
-            Font(s) => format!("FONT {}", s),
+        match self {
+            StartFont(s)           => write!(f, "STARTFONT {}\n", s),
+            Comment(s)             => write!(f, "COMMENT {}\n", s),
+            ContentVersion(s)      => write!(f, "CONTENTVERSION {}\n", s),
+            Font(s)                => write!(f, "FONT {}\n", s),
+            Chars(u)               => write!(f, "CHARS {}\n", u),
+            EndFont                => write!(f, "ENDFONT\n"),
+            StartProperties(u)     => write!(f, "STARTPROPERTIES {}\n", u),
+            EndProperties          => write!(f, "ENDPROPERTIES\n"),
+            StartChar(s)           => write!(f, "STARTCHAR {}\n", s),
+            &Encoding(c)           => write!(f, "ENCODING {}\n", c as u32),
+            &MetricsSet(m)         => write!(f, "METRICSSET {}\n", m as u8),
+            ScalableWidth(x, y)    => write!(f, "SWIDTH {} {}\n", x, y),
+            DeviceWidth(x, y)      => write!(f, "DWIDTH {} {}\n", x, y),
+            ScalableWidthAlt(x, y) => write!(f, "SWIDTH1 {} {}\n", x, y),
+            DeviceWidthAlt(x, y)   => write!(f, "DWIDTH1 {} {}\n", x, y),
+            Vector(x, y)           => write!(f, "VVECTOR {} {}\n", x, y),
+            EndChar                => write!(f, "ENDCHAR\n"),
             Size(FontSize { point_size, x_dpi, y_dpi }) => {
-                format!("SIZE {} {} {}", point_size, x_dpi, y_dpi)
+                write!(f, "SIZE {} {} {}\n", point_size, x_dpi, y_dpi)
             },
-            Chars(u) => format!("CHARS {}", u),
             FontBoundingBox(b) => {
-                format!("FONTBOUNDINGBOX {} {} {} {}",
+                write!(f, "FONTBOUNDINGBOX {} {} {} {}\n",
                     b.width,
                     b.height,
                     b.x_offset,
                     b.y_offset,)
             },
-            EndFont => String::from("ENDFONT"),
-            StartProperties(u) => format!("STARTPROPERTIES {}", u),
             Property(name, bdf::Property::Str(s)) => {
-                format!("{} {}", name, s.replace("\"", "\"\""))
+                write!(f, "{} {}\n", name, s.replace("\"", "\"\""))
             },
             Property(name, bdf::Property::Int(i)) => {
-                format!("{} {}", name, i)
+                write!(f, "{} {}\n", name, i)
             },
-            EndProperties => String::from("ENDPROPERTIES"),
-            StartChar(s) => format!("STARTCHAR {}", s),
-            Encoding(c) => format!("ENCODING {}", c as u32),
-            MetricsSet(m) => format!("METRICSSET {}", m as u8),
-            ScalableWidth(x, y) => format!("SWIDTH {} {}", x, y),
-            DeviceWidth(x, y) => format!("DWIDTH {} {}", x, y),
-            ScalableWidthAlt(x, y) => format!("SWIDTH1 {} {}", x, y),
-            DeviceWidthAlt(x, y) => format!("DWIDTH1 {} {}", x, y),
-            Vector(x, y) => format!("VVECTOR {} {}", x, y),
             BoundingBox(b) => {
-                format!("BBX {} {} {} {}",
+                write!(f, "BBX {} {} {} {}\n",
                     b.width,
                     b.height,
                     b.x_offset,
                     b.y_offset,)
             },
             Bitmap(b) => {
-                // TODO
-                String::new()
+                let mut buf = String::from("BITMAP\n");
+                buf.reserve(b.width() * b.height() / 4 + b.height());
+
+                for row in b.rows() {
+                    for byte in row.to_bytes() {
+                        write!(&mut buf, "{:02X}", byte)?;
+                    }
+                    write!(&mut buf, "\n")?;
+                }
+
+                f.write_str(&buf)
             }
-            EndChar => String::from("ENDCHAR"),
         }
     }
 }
