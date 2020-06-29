@@ -10,10 +10,20 @@ use crate::{
 
 //
 
+// TODO errors
+
 pub enum WritingMetrics {
     Normal = 0,
     Alternate,
     Both,
+}
+
+// #[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct BoundingBox {
+    pub width: u32,
+    pub height: u32,
+    pub x_offset: i32,
+    pub y_offset: i32,
 }
 
 // #[derive(Debug)]
@@ -31,7 +41,6 @@ pub struct Glyph {
     pub device_width_alt: Option<(u32, u32)>,
 
     pub vector: Option<(u32, u32)>,
-
 }
 
 impl Glyph {
@@ -66,16 +75,8 @@ impl Glyph {
 }
 
 // #[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub struct BoundingBox {
-    pub width: u32,
-    pub height: u32,
-    pub x_offset: i32,
-    pub y_offset: i32,
-}
-
-// #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct FontSize {
-    pub point_sz: u16,
+    pub point_size: u16,
     pub x_dpi: u16,
     pub y_dpi: u16,
 }
@@ -102,7 +103,6 @@ pub struct Font {
     pub scalable_width_alt: Option<(u32, u32)>,
     pub device_width_alt: Option<(u32, u32)>,
     pub vector: Option<(u32, u32)>,
-
 }
 
 impl Font {
