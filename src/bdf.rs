@@ -13,7 +13,9 @@ use bit_vec::BitVec;
 
 pub struct ForBdf<'a, T>(&'a T);
 
-pub trait BdfElement: Sized {
+pub trait BdfValue: Sized {
+    fn desired() -> &'static str;
+
     fn for_bdf(&self) -> ForBdf<Self> {
         ForBdf(self)
     }
@@ -66,6 +68,7 @@ impl Bitmap {
     }
 }
 
+/*
 impl BdfElement for Bitmap {}
 
 impl<'a> fmt::Display for ForBdf<'a, Bitmap> {
@@ -82,28 +85,17 @@ impl<'a> fmt::Display for ForBdf<'a, Bitmap> {
         Ok(())
     }
 }
+*/
 
 //
 
-pub struct ParseError {
-    pub desired: &'static str,
-}
-
-impl ParseError {
-    pub fn new(desired: &'static str) -> Self {
-        Self {
-            desired,
-        }
-    }
-}
-
-fn parse_to_parts(s: &str, n: usize) -> Option<SplitWhitespace> {
+fn parse_to_parts(s: &str, n: usize) -> Result<SplitWhitespace, usize> {
     let mut parts = s.split_whitespace();
     let parts_ct = parts.clone().count();
     if parts_ct == n {
-        Some(parts)
+        Ok(parts)
     } else {
-        None
+        Err(parts_ct)
     }
 }
 
@@ -125,34 +117,27 @@ impl XYPair {
     }
 }
 
+impl BdfValue for XYPair {
+    fn desired() -> &'static str {
+        "X:integer Y:integer"
+    }
+}
+
 impl FromStr for XYPair {
-    type Err = ParseError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let desired = "X:integer Y:integer";
-        let mut parts = match parse_to_parts(s, 2) {
-            Some(p) => p,
-            None    => return Err(ParseError::new(desired)),
-        };
+        let mut parts = parse_to_parts(s, 2).or(Err(Self::desired()))?;
 
         let x = parts.next().unwrap();
         let y = parts.next().unwrap();
 
-        let x = match x.parse() {
-            Ok(v) => v,
-            Err(_) => return Err(ParseError::new(desired)),
-        };
-
-        let y = match y.parse() {
-            Ok(v) => v,
-            Err(_) => return Err(ParseError::new(desired)),
-        };
+        let x = x.parse().or(Err(Self::desired()))?;
+        let y = y.parse().or(Err(Self::desired()))?;
 
         Ok(Self::new(x, y))
     }
 }
-
-impl BdfElement for XYPair {}
 
 impl<'a> fmt::Display for ForBdf<'a, XYPair> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -162,6 +147,7 @@ impl<'a> fmt::Display for ForBdf<'a, XYPair> {
 
 //
 
+// TODO rename to metricsset
 #[derive(Copy, Clone)]
 pub enum WritingMetrics {
     Normal = 0,
@@ -169,19 +155,21 @@ pub enum WritingMetrics {
     Both,
 }
 
-impl BdfElement for WritingMetrics {}
+impl BdfValue for WritingMetrics {
+    fn desired() -> &'static str {
+        "N:integer(0, 1 or 2)"
+    }
+}
 
 impl FromStr for WritingMetrics {
-    type Err = ParseError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let desired = "N:integer(0, 1 or 2)";
-
         let wm = match s.parse() {
             Ok(0) => WritingMetrics::Normal,
             Ok(1) => WritingMetrics::Alternate,
             Ok(2) => WritingMetrics::Both,
-            _ => return Err(ParseError::new(desired)),
+            _ => return Err(Self::desired()),
         };
 
         Ok(wm)
@@ -215,47 +203,31 @@ impl BoundingBox {
     }
 }
 
+impl BdfValue for BoundingBox {
+    fn desired() -> &'static str {
+        "W:integer H:integer X:integer Y:integer"
+    }
+}
+
 impl FromStr for BoundingBox {
-    type Err = ParseError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let desired = "W:integer H:integer X:integer Y:integer";
-
-        let mut parts = match parse_to_parts(s, 4) {
-            Some(p) => p,
-            None    => return Err(ParseError::new(desired)),
-        };
+        let mut parts = parse_to_parts(s, 4).or(Err(Self::desired()))?;
 
         let w = parts.next().unwrap();
         let h = parts.next().unwrap();
         let x = parts.next().unwrap();
         let y = parts.next().unwrap();
 
-        let w = match w.parse() {
-            Ok(v) => v,
-            Err(_) => return Err(ParseError::new(desired)),
-        };
-
-        let h = match h.parse() {
-            Ok(v) => v,
-            Err(_) => return Err(ParseError::new(desired)),
-        };
-
-        let x = match x.parse() {
-            Ok(v) => v,
-            Err(_) => return Err(ParseError::new(desired)),
-        };
-
-        let y = match y.parse() {
-            Ok(v) => v,
-            Err(_) => return Err(ParseError::new(desired)),
-        };
+        let w = w.parse().or(Err(Self::desired()))?;
+        let h = h.parse().or(Err(Self::desired()))?;
+        let x = x.parse().or(Err(Self::desired()))?;
+        let y = y.parse().or(Err(Self::desired()))?;
 
         Ok(Self::new(w, h, x, y))
     }
 }
-
-impl BdfElement for BoundingBox {}
 
 impl<'a> fmt::Display for ForBdf<'a, BoundingBox> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -288,41 +260,29 @@ impl FontSize {
     }
 }
 
+impl BdfValue for FontSize {
+    fn desired() -> &'static str {
+        "PT:number X:number Y:number"
+    }
+}
+
 impl FromStr for FontSize {
-    type Err = ParseError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let desired = "PT:number X:number Y:number";
-
-        let mut parts = match parse_to_parts(s, 3) {
-            Some(p) => p,
-            None    => return Err(ParseError::new(desired)),
-        };
+        let mut parts = parse_to_parts(s, 3).or(Err(Self::desired()))?;
 
         let p = parts.next().unwrap();
         let x = parts.next().unwrap();
         let y = parts.next().unwrap();
 
-        let p = match p.parse() {
-            Ok(v) => v,
-            Err(_) => return Err(ParseError::new(desired)),
-        };
-
-        let x = match x.parse() {
-            Ok(v) => v,
-            Err(_) => return Err(ParseError::new(desired)),
-        };
-
-        let y = match y.parse() {
-            Ok(v) => v,
-            Err(_) => return Err(ParseError::new(desired)),
-        };
+        let p = p.parse().or(Err(Self::desired()))?;
+        let x = x.parse().or(Err(Self::desired()))?;
+        let y = y.parse().or(Err(Self::desired()))?;
 
         Ok(Self::new(p, x, y))
     }
 }
-
-impl BdfElement for FontSize {}
 
 impl<'a> fmt::Display for ForBdf<'a, FontSize> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -342,28 +302,28 @@ pub enum PropertyValue {
     Int(i32),
 }
 
+impl BdfValue for PropertyValue {
+    fn desired() -> &'static str {
+        "\"string\"|i:integer"
+    }
+}
+
 impl FromStr for PropertyValue {
-    type Err = ParseError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let desired = "\"string\"|i:integer";
         if s.starts_with('"') {
             let string = match (&s[1..]).rfind('"') {
                 Some(n) => s[1..n].replace("\"\"", "\""),
-                None    => return Err(ParseError::new(desired)),
+                None    => return Err(Self::desired()),
             };
             Ok(PropertyValue::Str(string))
         } else {
-            let i = match s.parse() {
-                Ok(v) => v,
-                Err(_) => return Err(ParseError::new(desired)),
-            };
+            let i = s.parse().or(Err(Self::desired()))?;
             Ok(PropertyValue::Int(i))
         }
     }
 }
-
-impl BdfElement for PropertyValue {}
 
 impl<'a> fmt::Display for ForBdf<'a, PropertyValue> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -389,6 +349,7 @@ impl Property {
     }
 }
 
+/*
 impl BdfElement for Property {}
 
 impl<'a> fmt::Display for ForBdf<'a, Property> {
@@ -396,6 +357,7 @@ impl<'a> fmt::Display for ForBdf<'a, Property> {
         write!(f, "{} {}\n", self.0.name, self.0.value.for_bdf())
     }
 }
+*/
 
 //
 
@@ -434,6 +396,7 @@ impl Glyph {
     }
 }
 
+/*
 impl BdfElement for Glyph {}
 
 impl<'a> fmt::Display for ForBdf<'a, Glyph> {
@@ -464,6 +427,7 @@ impl<'a> fmt::Display for ForBdf<'a, Glyph> {
         write!(f, "ENDCHAR\n")
     }
 }
+*/
 
 //
 
@@ -510,6 +474,7 @@ impl Font {
     }
 }
 
+/*
 impl BdfElement for Font {}
 
 impl<'a> fmt::Display for ForBdf<'a, Font> {
@@ -559,6 +524,7 @@ impl<'a> fmt::Display for ForBdf<'a, Font> {
         write!(f, "ENDFONT\n")
     }
 }
+*/
 
 //
 
@@ -621,7 +587,7 @@ impl<'a> FontShell<'a> {
     }
 
     fn to_font(self) -> Result<Font, Error> {
-        Err(Error::ParsingError(0))
+        Err(Error::ParseError(0, ""))
 
         /*
         pub fn validate(&self) -> bool {
@@ -673,7 +639,7 @@ impl<'a> GlyphShell<'a> {
 
     fn to_glyph(self) -> Result<Glyph, Error> {
 
-        Err(Error::ParsingError(0))
+        Err(Error::ParseError(0, ""))
         /*
         pub fn validate(&self) -> bool {
             match self.metrics {
@@ -725,13 +691,7 @@ pub enum Error {
     MissingValue(usize, String),
     UnexpectedEntry(usize, String),
     InvalidCodepoint(usize, u32),
-    // TODO incl bdf::ParseError
-    //      just put bdf::ParseError in here
-    //              maybe line   desired
-    // ParsingError(Some(usize), &'static str)
-    //   will actually get rid of alot of the repeditive code for parsing
-    //   try to find way to autoconvert intparse errors to parsing error
-    ParsingError(usize),
+    ParseError(usize, &'static str),
     NotFound(&'static str),
     FontValidation(&'static str),
     GlyphValidation(&'static str),
@@ -778,8 +738,12 @@ impl Parser {
             };
 
             match (state, id, rest) {
-                (ParseState::InBitmap, val, None) => {}
-                (ParseState::InBitmap, _, Some(_)) => {}
+                (ParseState::InBitmap, val, None) => {
+                    // check bitmap ct
+                }
+                (ParseState::InBitmap, _, Some(_)) => {
+                    return Err(ParseError(line_num, ""));
+                }
 
                 (_, ids::COMMENT, Some(s)) => {
                     f_shell.comments.push(s);
@@ -814,8 +778,6 @@ impl Parser {
 
             let rest = rest.unwrap();
 
-            f_shell.name = Some(rest);
-
             match state {
                 ParseState::Empty => match id {
                     ids::STARTFONT => {
@@ -829,70 +791,46 @@ impl Parser {
                         f_shell.name = Some(rest);
                     },
                     ids::CONTENTVERSION => {
-                        match rest.parse() {
-                            Ok(val) => f_shell.content_version = Some(val),
-                            Err(_) => return Err(ParsingError(line_num)),
-                        }
+                        let val = rest.parse().or_else(|_| Err(ParseError(line_num, "integer")))?;
+                        f_shell.content_version = Some(val);
                     },
                     ids::SIZE => {
-                        match rest.parse() {
-                            Ok(val) => f_shell.size = Some(val),
-                            Err(_) => return Err(ParsingError(line_num)),
-                        }
+                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                        f_shell.size = Some(val);
                     },
                     ids::FONTBOUNDINGBOX => {
-                        match rest.parse() {
-                            Ok(val) => {
-                                f_shell.bounding_box = Some(val);
-                                main_bbox = Some(val);
-                            },
-                            Err(_) => return Err(ParsingError(line_num)),
-                        }
+                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                        f_shell.bounding_box = Some(val);
+                        main_bbox = Some(val);
                     },
                     ids::METRICSSET => {
-                        match rest.parse() {
-                            Ok(val) => f_shell.metrics = Some(val),
-                            Err(_) => return Err(ParsingError(line_num)),
-                        }
+                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                        f_shell.metrics = Some(val);
                     },
                     ids::SWIDTH => {
-                        match rest.parse() {
-                            Ok(val) => f_shell.scalable_width = Some(val),
-                            Err(_) => return Err(ParsingError(line_num)),
-                        };
+                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                        f_shell.scalable_width = Some(val);
                     },
                     ids::DWIDTH => {
-                        match rest.parse() {
-                            Ok(val) => f_shell.device_width = Some(val),
-                            Err(_) => return Err(ParsingError(line_num)),
-                        };
+                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                        f_shell.device_width = Some(val);
                     },
                     ids::SWIDTH1 => {
-                        match rest.parse() {
-                            Ok(val) => f_shell.scalable_width_alt = Some(val),
-                            Err(_) => return Err(ParsingError(line_num)),
-                        };
+                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                        f_shell.scalable_width_alt = Some(val);
                     },
                     ids::DWIDTH1 => {
-                        match rest.parse() {
-                            Ok(val) => f_shell.device_width_alt = Some(val),
-                            Err(_) => return Err(ParsingError(line_num)),
-                        };
+                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                        f_shell.device_width_alt = Some(val);
                     },
                     ids::VVECTOR => {
-                        match rest.parse() {
-                            Ok(val) => f_shell.vector = Some(val),
-                            Err(_) => return Err(ParsingError(line_num)),
-                        };
+                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                        f_shell.vector = Some(val);
                     },
                     ids::CHARS => {
-                        match rest.parse() {
-                            Ok(val) => {
-                                glyphs_ct = val;
-                                state = ParseState::InChars;
-                            },
-                            Err(_) => return Err(ParsingError(line_num)),
-                        }
+                        let val = rest.parse().or_else(|_| Err(ParseError(line_num, "integer")))?;
+                        glyphs_ct = val;
+                        state = ParseState::InChars;
                     },
                     id => return Err(UnexpectedEntry(line_num, String::from(id))),
                 }
@@ -904,12 +842,12 @@ impl Parser {
                         if rest.ends_with('"') {
                             f_shell.properties.push(PropertyShell::new(id, Str(rest)));
                         } else {
-                            return Err(ParsingError(line_num));
+                            return Err(ParseError(line_num, "\"string\""));
                         }
                     } else {
                         match rest.parse() {
                             Ok(i) => f_shell.properties.push(PropertyShell::new(id, Int(i))),
-                            Err(_) => return Err(ParsingError(line_num)),
+                            Err(_) => return Err(ParseError(line_num, "integer")),
                         };
                     }
                 }
@@ -933,53 +871,37 @@ impl Parser {
                                         Err(_) => return Err(InvalidCodepoint(line_num, u)),
                                     }
                                 }
-                                Err(_) => return Err(ParsingError(line_num)),
+                                Err(_) => return Err(ParseError(line_num, "u32")),
                             };
                         },
                         ids::METRICSSET => {
-                            match rest.parse() {
-                                Ok(val) => g_shell.metrics = Some(val),
-                                Err(_) => return Err(ParsingError(line_num)),
-                            }
+                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                            g_shell.metrics = Some(val);
                         },
                         ids::SWIDTH => {
-                            match rest.parse() {
-                                Ok(val) => g_shell.scalable_width = Some(val),
-                                Err(_) => return Err(ParsingError(line_num)),
-                            };
+                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                            g_shell.scalable_width = Some(val);
                         },
                         ids::DWIDTH => {
-                            match rest.parse() {
-                                Ok(val) => g_shell.device_width = Some(val),
-                                Err(_) => return Err(ParsingError(line_num)),
-                            };
+                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                            g_shell.device_width = Some(val);
                         },
                         ids::SWIDTH1 => {
-                            match rest.parse() {
-                                Ok(val) => g_shell.scalable_width_alt = Some(val),
-                                Err(_) => return Err(ParsingError(line_num)),
-                            };
+                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                            g_shell.scalable_width_alt = Some(val);
                         },
                         ids::DWIDTH1 => {
-                            match rest.parse() {
-                                Ok(val) => g_shell.device_width_alt = Some(val),
-                                Err(_) => return Err(ParsingError(line_num)),
-                            };
+                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                            g_shell.device_width_alt = Some(val);
                         },
                         ids::VVECTOR => {
-                            match rest.parse() {
-                                Ok(val) => g_shell.vector = Some(val),
-                                Err(_) => return Err(ParsingError(line_num)),
-                            };
+                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                            g_shell.vector = Some(val);
                         },
                         ids::BBX => {
-                            match rest.parse() {
-                                Ok(val) => {
-                                    g_shell.bounding_box = Some(val);
-                                    curr_bbox = Some(val);
-                                }
-                                Err(_) => return Err(ParsingError(line_num)),
-                            };
+                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
+                            g_shell.bounding_box = Some(val);
+                            curr_bbox = Some(val);
                         },
                         // TODO bitmap
                         id => return Err(UnexpectedEntry(line_num, String::from(id))),
@@ -992,6 +914,6 @@ impl Parser {
             }
         }
 
-        Err(ParsingError(0))
+        Err(ParseError(0, ""))
     }
 }

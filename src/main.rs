@@ -1,5 +1,4 @@
 use bdf_font::{
-    bdf::BdfElement,
     bdf::Bitmap,
     bdf::XYPair,
 };
@@ -14,5 +13,5 @@ fn main() {
         }
     }
 
-    println!("{}", bmp.for_bdf());
+    // println!("{}", bmp.for_bdf());
 }
