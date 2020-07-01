@@ -1,4 +1,8 @@
 use std::{
+    ops::{
+        Deref,
+        DerefMut,
+    },
     convert::TryFrom,
     fmt,
     str::{
@@ -11,9 +15,9 @@ use bit_vec::BitVec;
 
 //
 
-pub struct ForBdf<'a, T>(&'a T);
+pub struct ForBdf<'a, T: ?Sized>(&'a T);
 
-pub trait BdfValue: Sized {
+pub trait BdfValue {
     fn desired() -> &'static str;
 
     fn for_bdf(&self) -> ForBdf<Self> {
@@ -21,76 +25,16 @@ pub trait BdfValue: Sized {
     }
 }
 
-//
-
-#[derive(Clone)]
-pub struct Bitmap {
-    width: usize,
-    height: usize,
-    data: Vec<BitVec>
-}
-
-impl Bitmap {
-    pub fn new(width: usize, height: usize) -> Self {
-        Self {
-            width,
-            height,
-            data: vec![BitVec::from_elem(width, false); height]
-        }
-    }
-
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    pub fn height(&self) -> usize {
-        self.height
-    }
-
-    pub fn rows(&self) -> &[BitVec] {
-        &self.data
-    }
-
-    pub fn get(&self, x: usize, y: usize) -> Option<bool> {
-        if x >= self.width || y >= self.height {
-            None
-        } else {
-            Some(self.data[x][y])
-        }
-    }
-
-    pub fn set(&mut self, x: usize, y: usize, to: bool) {
-        if x >= self.width || y >= self.height {
-            return;
-        } else {
-            self.data[x].set(y, to);
-        }
+pub trait BdfBlock {
+    fn for_bdf(&self) -> ForBdf<Self> {
+        ForBdf(self)
     }
 }
-
-/*
-impl BdfElement for Bitmap {}
-
-impl<'a> fmt::Display for ForBdf<'a, Bitmap> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BITMAP\n")?;
-
-        for row in self.0.rows() {
-            for byte in row.to_bytes() {
-                write!(f, "{:02X}", byte)?;
-            }
-            write!(f, "\n")?;
-        }
-
-        Ok(())
-    }
-}
-*/
 
 //
 
-fn parse_to_parts(s: &str, n: usize) -> Result<SplitWhitespace, usize> {
-    let mut parts = s.split_whitespace();
+fn split_to_parts(s: &str, n: usize) -> Result<SplitWhitespace, usize> {
+    let parts = s.split_whitespace();
     let parts_ct = parts.clone().count();
     if parts_ct == n {
         Ok(parts)
@@ -102,7 +46,7 @@ fn parse_to_parts(s: &str, n: usize) -> Result<SplitWhitespace, usize> {
 //
 
 // TODO handle float vs integer for scalable vs device width
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct XYPair {
     pub x: u32,
     pub y: u32,
@@ -127,7 +71,7 @@ impl FromStr for XYPair {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = parse_to_parts(s, 2).or(Err(Self::desired()))?;
+        let mut parts = split_to_parts(s, 2).or(Err(Self::desired()))?;
 
         let x = parts.next().unwrap();
         let y = parts.next().unwrap();
@@ -148,7 +92,7 @@ impl<'a> fmt::Display for ForBdf<'a, XYPair> {
 //
 
 // TODO rename to metricsset
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum WritingMetrics {
     Normal = 0,
     Alternate,
@@ -184,7 +128,7 @@ impl<'a> fmt::Display for ForBdf<'a, WritingMetrics> {
 
 //
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct BoundingBox {
     pub width: u32,
     pub height: u32,
@@ -213,7 +157,7 @@ impl FromStr for BoundingBox {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = parse_to_parts(s, 4).or(Err(Self::desired()))?;
+        let mut parts = split_to_parts(s, 4).or(Err(Self::desired()))?;
 
         let w = parts.next().unwrap();
         let h = parts.next().unwrap();
@@ -242,7 +186,7 @@ impl<'a> fmt::Display for ForBdf<'a, BoundingBox> {
 
 //
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct FontSize {
     // TODO i think these should be floats
     pub point_size: u32,
@@ -270,7 +214,7 @@ impl FromStr for FontSize {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = parse_to_parts(s, 3).or(Err(Self::desired()))?;
+        let mut parts = split_to_parts(s, 3).or(Err(Self::desired()))?;
 
         let p = parts.next().unwrap();
         let x = parts.next().unwrap();
@@ -296,7 +240,7 @@ impl<'a> fmt::Display for ForBdf<'a, FontSize> {
 
 //
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PropertyValue {
     Str(String),
     Int(i32),
@@ -328,41 +272,134 @@ impl FromStr for PropertyValue {
 impl<'a> fmt::Display for ForBdf<'a, PropertyValue> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.0 {
-            PropertyValue::Str(s) => write!(f, "{}", s.replace("\"", "\"\"")),
+            // TODO note: dont like creating new str here
+            PropertyValue::Str(s) => write!(f, "\"{}\"", s.replace("\"", "\"\"")),
             PropertyValue::Int(i) => write!(f, "{}", i),
         }
     }
 }
 
-#[derive(Clone)]
-pub struct Property {
-    pub name: String,
-    pub value: PropertyValue,
+//
+
+#[derive(Clone, Debug)]
+pub struct BitmapRow(BitVec);
+
+impl Deref for BitmapRow {
+    type Target = BitVec;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-impl Property {
-    pub fn new(name: &str, value: &PropertyValue) -> Self {
+impl DerefMut for BitmapRow {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl BdfValue for BitmapRow {
+    fn desired() -> &'static str {
+        "bytestring"
+    }
+}
+
+impl FromStr for BitmapRow {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() % 2 != 0 {
+            return Err(Self::desired());
+        }
+
+        let mut buf: Vec<u8> = Vec::new();
+        buf.reserve(s.len() / 2);
+
+        for i in 0..(s.len() / 2) {
+            buf.push(u8::from_str_radix(&s[i..=(i+1)], 16).or_else(|_| Err(Self::desired()))?);
+        }
+
+        Ok(Self(BitVec::from_bytes(&buf)))
+    }
+}
+
+impl<'a> fmt::Display for ForBdf<'a, BitmapRow> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for byte in self.0.to_bytes() {
+            write!(f, "{:02X}", byte)?;
+        }
+
+        Ok(())
+    }
+}
+
+//
+
+// TODO use ids:: for bdfblock printing
+
+#[derive(Clone, Debug)]
+pub struct Bitmap {
+    width: usize,
+    height: usize,
+    data: Vec<BitmapRow>
+}
+
+impl Bitmap {
+    pub fn new(width: usize, height: usize) -> Self {
         Self {
-            name: String::from(name),
-            value: value.clone(),
+            width,
+            height,
+            data: vec![BitmapRow(BitVec::from_elem(width, false)); height]
+        }
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn rows(&self) -> &[BitmapRow] {
+        &self.data
+    }
+
+    pub fn get(&self, x: usize, y: usize) -> Option<bool> {
+        if x >= self.width || y >= self.height {
+            None
+        } else {
+            Some(self.data[y][x])
+        }
+    }
+
+    pub fn set(&mut self, x: usize, y: usize, to: bool) {
+        if x >= self.width || y >= self.height {
+            return;
+        } else {
+            self.data[y].set(x, to);
         }
     }
 }
 
-/*
-impl BdfElement for Property {}
+impl BdfBlock for Bitmap {}
 
-impl<'a> fmt::Display for ForBdf<'a, Property> {
+impl<'a> fmt::Display for ForBdf<'a, Bitmap> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}\n", self.0.name, self.0.value.for_bdf())
+        write!(f, "BITMAP\n")?;
+
+        for row in self.0.rows() {
+            write!(f, "{}\n", row.for_bdf())?;
+        }
+
+        Ok(())
     }
 }
-*/
 
 //
 
-// #[derive(Debug)]
-// TODO handle encodingwith two integers
+// TODO handle encoding with two integers
+#[derive(Debug)]
 pub struct Glyph {
     pub name: String,
     pub codepoint: char,
@@ -396,8 +433,7 @@ impl Glyph {
     }
 }
 
-/*
-impl BdfElement for Glyph {}
+impl BdfBlock for Glyph {}
 
 impl<'a> fmt::Display for ForBdf<'a, Glyph> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -427,11 +463,35 @@ impl<'a> fmt::Display for ForBdf<'a, Glyph> {
         write!(f, "ENDCHAR\n")
     }
 }
-*/
 
 //
 
-// #[derive(Debug)]
+#[derive(Clone, Debug)]
+pub struct Property {
+    pub name: String,
+    pub value: PropertyValue,
+}
+
+impl Property {
+    pub fn new(name: &str, value: &PropertyValue) -> Self {
+        Self {
+            name: String::from(name),
+            value: value.clone(),
+        }
+    }
+}
+
+impl BdfBlock for Property {}
+
+impl<'a> fmt::Display for ForBdf<'a, Property> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {}\n", self.0.name, self.0.value.for_bdf())
+    }
+}
+
+//
+
+#[derive(Debug)]
 pub struct Font {
     pub bdf_version: String,
     pub name: String,
@@ -474,8 +534,7 @@ impl Font {
     }
 }
 
-/*
-impl BdfElement for Font {}
+impl BdfBlock for Font {}
 
 impl<'a> fmt::Display for ForBdf<'a, Font> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -524,15 +583,136 @@ impl<'a> fmt::Display for ForBdf<'a, Font> {
         write!(f, "ENDFONT\n")
     }
 }
-*/
 
 //
 
+#[derive(Clone, Debug)]
+struct BitmapShell {
+    pub width: usize,
+    pub height: usize,
+    pub data: Vec<BitmapRow>
+}
+
+impl BitmapShell {
+    pub fn new() -> Self {
+        Self {
+            width: 0,
+            height: 0,
+            data: Vec::new(),
+        }
+    }
+
+    fn to_bitmap(self) -> Result<Bitmap, Error> {
+        Ok(Bitmap {
+            width: self.width,
+            height: self.height,
+            data: self.data,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct GlyphShell<'a> {
+    pub name: Option<&'a str>,
+    pub codepoint: Option<char>,
+    pub bounding_box: Option<BoundingBox>,
+    pub bitmap: BitmapShell,
+
+    pub metrics: Option<WritingMetrics>,
+
+    pub scalable_width: Option<XYPair>,
+    pub device_width: Option<XYPair>,
+    pub scalable_width_alt: Option<XYPair>,
+    pub device_width_alt: Option<XYPair>,
+    pub vector: Option<XYPair>,
+}
+
+impl<'a> GlyphShell<'a> {
+    fn new() -> Self {
+        Self {
+            name: None,
+            codepoint: None,
+            bounding_box: None,
+            bitmap: BitmapShell::new(),
+            metrics: None,
+            scalable_width: None,
+            device_width: None,
+            scalable_width_alt: None,
+            device_width_alt: None,
+            vector: None,
+        }
+    }
+
+    fn to_glyph(self) -> Result<Glyph, Error> {
+        use Error::*;
+
+        if self.codepoint.is_none() {
+            return Err(GlyphValidation('\0', "codepoint not found"));
+        }
+
+        let codepoint = self.codepoint.unwrap();
+
+        if self.name.is_none() {
+            return Err(GlyphValidation(codepoint, "name not found"));
+        } else if self.bounding_box.is_none() {
+            return Err(GlyphValidation(codepoint, "bounding box not found"));
+        }
+
+        match self.metrics {
+            None => {}
+            Some(WritingMetrics::Normal) => {
+                if !(self.scalable_width_alt.is_none() &&
+                     self.device_width_alt.is_none()) {
+                    // TODO
+                    return Err(GlyphValidation(codepoint, ""));
+                }
+            }
+            Some(_) => {
+                if !(self.scalable_width_alt.is_some() &&
+                     self.device_width_alt.is_some()) {
+                    // TODO
+                    return Err(GlyphValidation(codepoint, ""));
+                }
+            }
+        }
+
+        let bitmap = match self.bitmap.to_bitmap() {
+            Ok(b) => b,
+            Err(BitmapInvalidRow) => return Err(GlyphValidation(codepoint, "bitmap contains invalid row")),
+            Err(_) => unreachable!(),
+        };
+
+        Ok(Glyph {
+            name: String::from(self.name.unwrap()),
+            codepoint,
+            bounding_box: self.bounding_box.unwrap(),
+            bitmap,
+            metrics: self.metrics.unwrap_or(WritingMetrics::Normal),
+            scalable_width: self.scalable_width,
+            device_width: self.device_width,
+            scalable_width_alt: self.scalable_width_alt,
+            device_width_alt: self.device_width_alt,
+            vector: self.vector,
+        })
+    }
+}
+
+#[derive(Debug)]
 enum PropertyValueShell<'a> {
     Str(&'a str),
     Int(i32),
 }
 
+impl<'a> PropertyValueShell<'a> {
+    fn to_property_value(self) -> Result<PropertyValue, Error> {
+        Ok(match self {
+            Self::Str(s) => PropertyValue::Str(String::from(s)),
+            Self::Int(i) => PropertyValue::Int(i),
+        })
+    }
+}
+
+#[derive(Debug)]
 struct PropertyShell<'a> {
     pub name: &'a str,
     pub value: PropertyValueShell<'a>
@@ -545,8 +725,16 @@ impl<'a> PropertyShell<'a> {
             value,
         }
     }
+
+    fn to_property(self) -> Result<Property, Error> {
+        Ok(Property {
+            name: String::from(self.name),
+            value: self.value.to_property_value().unwrap(),
+        })
+    }
 }
 
+#[derive(Debug)]
 struct FontShell<'a> {
     pub bdf_version: Option<&'a str>,
     pub name: Option<&'a str>,
@@ -587,74 +775,64 @@ impl<'a> FontShell<'a> {
     }
 
     fn to_font(self) -> Result<Font, Error> {
-        Err(Error::ParseError(0, ""))
+        use Error::*;
 
-        /*
-        pub fn validate(&self) -> bool {
-            match self.metrics {
-                WritingMetrics::Normal => {
-                    self.scalable_width_alt.is_none() &&
-                    self.device_width_alt.is_none()
+        if self.bdf_version.is_none() {
+            return Err(FontValidation("bdf version not found"));
+        } else if self.name.is_none() {
+            return Err(FontValidation("name not found"));
+        } else if self.size.is_none() {
+            return Err(FontValidation("size not found"));
+        } else if self.bounding_box.is_none() {
+            return Err(FontValidation("bounding box not found"));
+        }
+
+        match self.metrics {
+            None => {}
+            Some(WritingMetrics::Normal) => {
+                if !(self.scalable_width_alt.is_none() &&
+                     self.device_width_alt.is_none()) {
+                    // TODO
+                    return Err(FontValidation(""));
                 }
-                _ => {
-                    self.scalable_width_alt.is_some() &&
-                    self.device_width_alt.is_some()
+            }
+            Some(_) => {
+                if !(self.scalable_width_alt.is_some() &&
+                     self.device_width_alt.is_some()) {
+                    // TODO
+                    return Err(FontValidation(""));
                 }
             }
         }
-        */
-    }
-}
 
-struct GlyphShell<'a> {
-    pub name: Option<&'a str>,
-    pub codepoint: Option<char>,
-    pub bounding_box: Option<BoundingBox>,
-    pub bitmap: Option<Bitmap>,
+        let glyphs = self.glyphs.into_iter()
+                                .map(GlyphShell::to_glyph)
+                                .collect::<Result<Vec<_>, _>>()?;
+        let properties = self.properties.into_iter()
+                                        .map(PropertyShell::to_property)
+                                        .collect::<Result<Vec<_>, _>>()?;
+        let comments = self.comments.into_iter()
+                                    .map(String::from)
+                                    .collect();
 
-    pub metrics: Option<WritingMetrics>,
+        Ok(Font {
+            bdf_version: String::from(self.bdf_version.unwrap()),
+            name: String::from(self.name.unwrap()),
+            size: self.size.unwrap(),
+            bounding_box: self.bounding_box.unwrap(),
+            metrics: self.metrics.unwrap_or(WritingMetrics::Normal),
 
-    pub scalable_width: Option<XYPair>,
-    pub device_width: Option<XYPair>,
-    pub scalable_width_alt: Option<XYPair>,
-    pub device_width_alt: Option<XYPair>,
-    pub vector: Option<XYPair>,
-}
+            comments,
+            properties,
+            glyphs,
 
-impl<'a> GlyphShell<'a> {
-    fn new() -> Self {
-        Self {
-            name: None,
-            codepoint: None,
-            bounding_box: None,
-            bitmap: None,
-            metrics: None,
-            scalable_width: None,
-            device_width: None,
-            scalable_width_alt: None,
-            device_width_alt: None,
-            vector: None,
-        }
-    }
-
-    fn to_glyph(self) -> Result<Glyph, Error> {
-
-        Err(Error::ParseError(0, ""))
-        /*
-        pub fn validate(&self) -> bool {
-            match self.metrics {
-                WritingMetrics::Normal => {
-                    self.scalable_width_alt.is_none() &&
-                    self.device_width_alt.is_none()
-                }
-                _ => {
-                    self.scalable_width_alt.is_some() &&
-                    self.device_width_alt.is_some()
-                }
-            }
-        }
-        */
-
+            content_version: self.content_version,
+            scalable_width: self.scalable_width,
+            device_width: self.device_width,
+            scalable_width_alt: self.scalable_width_alt,
+            device_width_alt: self.device_width_alt,
+            vector: self.vector,
+        })
     }
 }
 
@@ -687,14 +865,16 @@ mod ids {
     pub const ENDCHAR: &str = "ENDCHAR";
 }
 
+#[derive(Debug)]
 pub enum Error {
     MissingValue(usize, String),
     UnexpectedEntry(usize, String),
+    MissingBoundingBox(usize),
     InvalidCodepoint(usize, u32),
     ParseError(usize, &'static str),
-    NotFound(&'static str),
+    BitmapInvalidRow,
     FontValidation(&'static str),
-    GlyphValidation(&'static str),
+    GlyphValidation(char, &'static str),
 }
 
 pub struct Parser;
@@ -707,7 +887,7 @@ impl Parser {
     pub fn parse(input: &str) -> Result<Font, Error> {
         use Error::*;
 
-        #[derive(Copy, Clone)]
+        #[derive(Eq, PartialEq, Copy, Clone)]
         enum ParseState {
             Empty,
             InFont,
@@ -719,15 +899,16 @@ impl Parser {
 
         let mut state = ParseState::Empty;
 
-        let mut properties_ct: Option<usize> = None;
+        let mut properties_ct: usize = 0;
         let mut glyphs_ct: usize = 0;
-        let mut bitmap_len: Option<usize> = None;
+        let mut bitmap_len: u32 = 0;
 
         let mut main_bbox: Option<BoundingBox> = None;
         let mut curr_bbox: Option<BoundingBox> = None;
 
         let mut f_shell = FontShell::new();
 
+        // TODO handle empty line
         let lines = input.trim().split('\n');
         let lines_ct = lines.clone().count();
         for (line_num, long_line) in lines.enumerate() {
@@ -737,14 +918,30 @@ impl Parser {
                 None    => (line, None),
             };
 
-            match (state, id, rest) {
-                (ParseState::InBitmap, val, None) => {
-                    // check bitmap ct
-                }
-                (ParseState::InBitmap, _, Some(_)) => {
-                    return Err(ParseError(line_num, ""));
-                }
+            if state == ParseState::InBitmap {
+                if bitmap_len == 0 {
+                    state = ParseState::InChar;
+                } else {
+                    match (id, rest) {
+                        (val, None) => {
+                            // TODO verify row width
+                            //   cant really do this because of the way things are padded
+                            //   you could at least make sure with doesnt exceed how much data you have
+                            let row = val.parse().or_else(|e| Err(ParseError(line_num, e)))?;
 
+                            let g_shell = f_shell.glyphs.last_mut().unwrap();
+                            g_shell.bitmap.data.push(row);
+                            bitmap_len -= 1;
+                            continue;
+                        }
+                        (_, Some(_)) => {
+                            return Err(ParseError(line_num, BitmapRow::desired()));
+                        }
+                    }
+                }
+            }
+
+            match (state, id, rest) {
                 (_, ids::COMMENT, Some(s)) => {
                     f_shell.comments.push(s);
                     continue;
@@ -753,9 +950,8 @@ impl Parser {
                 (ParseState::InChars, ids::ENDFONT, _) => {
                     // TODO check char ct
                     //      verify font
-                    state = ParseState::Empty;
-                    continue;
-                }
+                    break;
+                },
                 (_, id @ ids::ENDFONT, _) => return Err(UnexpectedEntry(line_num, String::from(id))),
 
                 (ParseState::InProperties, ids::ENDPROPERTIES, _) => {
@@ -766,10 +962,24 @@ impl Parser {
                 (_, id @ ids::ENDPROPERTIES, _) => return Err(UnexpectedEntry(line_num, String::from(id))),
 
                 (ParseState::InChar, ids::ENDCHAR, _) => {
-                    // TODO verify glyph
+                    // TODO verify glyph?
                     state = ParseState::InChars;
                     continue;
-                }
+                },
+                (ParseState::InChar, ids::BITMAP, _) => {
+                    let bbox = match (&main_bbox, &curr_bbox) {
+                        (_, Some(bbox)) | (Some(bbox), None) => bbox,
+                        (None, None) => return Err(MissingBoundingBox(line_num)),
+                    };
+
+                    let g_shell = f_shell.glyphs.last_mut().unwrap();
+                    g_shell.bitmap.width = bbox.width as usize;
+                    g_shell.bitmap.height = bbox.height as usize;
+
+                    bitmap_len = bbox.height;
+                    state = ParseState::InBitmap;
+                    continue;
+                },
                 (_, id @ ids::ENDCHAR, _) => return Err(UnexpectedEntry(line_num, String::from(id))),
 
                 (_, id, None) => return Err(MissingValue(line_num, String::from(id))),
@@ -827,6 +1037,11 @@ impl Parser {
                         let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
                         f_shell.vector = Some(val);
                     },
+                    ids::STARTPROPERTIES => {
+                        let val = rest.parse().or_else(|_| Err(ParseError(line_num, "integer")))?;
+                        properties_ct = val;
+                        state = ParseState::InProperties;
+                    }
                     ids::CHARS => {
                         let val = rest.parse().or_else(|_| Err(ParseError(line_num, "integer")))?;
                         glyphs_ct = val;
@@ -836,11 +1051,12 @@ impl Parser {
                 }
                 ParseState::InProperties => {
                     // TODO check properties len
+                    // TODO propertyvalue::from_str is never actually used
                     use PropertyValueShell::*;
 
                     if rest.starts_with('"') {
                         if rest.ends_with('"') {
-                            f_shell.properties.push(PropertyShell::new(id, Str(rest)));
+                            f_shell.properties.push(PropertyShell::new(id, Str(&rest[1..(rest.len()-1)])));
                         } else {
                             return Err(ParseError(line_num, "\"string\""));
                         }
@@ -854,6 +1070,8 @@ impl Parser {
                 ParseState::InChars => match id {
                     ids::STARTCHAR => {
                         f_shell.glyphs.push(GlyphShell::new());
+                        let g_shell = f_shell.glyphs.last_mut().unwrap();
+                        g_shell.name = Some(rest);
                         state = ParseState::InChar;
                     }
                     id => return Err(UnexpectedEntry(line_num, String::from(id))),
@@ -903,7 +1121,6 @@ impl Parser {
                             g_shell.bounding_box = Some(val);
                             curr_bbox = Some(val);
                         },
-                        // TODO bitmap
                         id => return Err(UnexpectedEntry(line_num, String::from(id))),
                     }
                 }
@@ -914,6 +1131,6 @@ impl Parser {
             }
         }
 
-        Err(ParseError(0, ""))
+        f_shell.to_font()
     }
 }
