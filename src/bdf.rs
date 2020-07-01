@@ -15,10 +15,58 @@ use bit_vec::BitVec;
 
 //
 
+mod ids {
+    pub const COMMENT: &str = "COMMENT";
+
+    pub const STARTFONT: &str = "STARTFONT";
+    pub const CONTENTVERSION: &str = "CONTENTVERSION";
+    pub const FONT: &str = "FONT";
+    pub const FONTBOUNDINGBOX: &str = "FONTBOUNDINGBOX";
+    pub const METRICSSET: &str = "METRICSSET";
+    pub const SIZE: &str = "SIZE";
+    pub const SWIDTH: &str = "SWIDTH";
+    pub const DWIDTH: &str = "DWIDTH";
+    pub const SWIDTH1: &str = "SWIDTH1";
+    pub const DWIDTH1: &str = "DWIDTH1";
+    pub const VVECTOR: &str = "VVECTOR";
+    pub const CHARS: &str = "CHARS";
+    pub const ENDFONT: &str = "ENDFONT";
+
+    pub const STARTPROPERTIES: &str = "STARTPROPERTIES";
+    pub const ENDPROPERTIES: &str = "ENDPROPERTIES";
+
+    pub const STARTCHAR: &str = "STARTCHAR";
+    pub const ENCODING: &str = "ENCODING";
+    pub const BBX: &str = "BBX";
+    pub const BITMAP: &str = "BITMAP";
+    pub const ENDCHAR: &str = "ENDCHAR";
+}
+
+//
+
+#[derive(Debug)]
+pub enum Error {
+    MissingValue(String),
+    UnexpectedEntry(String),
+    MissingBoundingBox,
+    InvalidCodepoint(u32),
+    ParseError(&'static str),
+    SpecialEncoding,
+
+    FontValidation(&'static str),
+    GlyphValidation(char, &'static str),
+}
+
+//
+
 pub struct ForBdf<'a, T: ?Sized>(&'a T);
 
 pub trait BdfValue {
     fn desired() -> &'static str;
+
+    fn parse_error() -> Error {
+        Error::ParseError(Self::desired())
+    }
 
     fn for_bdf(&self) -> ForBdf<Self> {
         ForBdf(self)
@@ -26,8 +74,13 @@ pub trait BdfValue {
 }
 
 pub trait BdfBlock {
-    fn for_bdf(&self) -> ForBdf<Self> {
-        ForBdf(self)
+    fn verify(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn for_bdf(&self) -> Result<ForBdf<Self>, Error> {
+        self.verify()?;
+        Ok(ForBdf(self))
     }
 }
 
@@ -67,16 +120,16 @@ impl BdfValue for XYPair {
 }
 
 impl FromStr for XYPair {
-    type Err = &'static str;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = split_to_parts(s, 2).or(Err(Self::desired()))?;
+        let mut parts = split_to_parts(s, 2).or(Err(Self::parse_error()))?;
 
         let x = parts.next().unwrap();
         let y = parts.next().unwrap();
 
-        let x = x.parse().or(Err(Self::desired()))?;
-        let y = y.parse().or(Err(Self::desired()))?;
+        let x = x.parse().or(Err(Self::parse_error()))?;
+        let y = y.parse().or(Err(Self::parse_error()))?;
 
         Ok(Self::new(x, y))
     }
@@ -104,14 +157,14 @@ impl BdfValue for MetricsSet {
 }
 
 impl FromStr for MetricsSet {
-    type Err = &'static str;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let wm = match s.parse() {
             Ok(0) => MetricsSet::Normal,
             Ok(1) => MetricsSet::Alternate,
             Ok(2) => MetricsSet::Both,
-            _ => return Err(Self::desired()),
+            _ => return Err(Self::parse_error()),
         };
 
         Ok(wm)
@@ -152,20 +205,20 @@ impl BdfValue for BoundingBox {
 }
 
 impl FromStr for BoundingBox {
-    type Err = &'static str;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = split_to_parts(s, 4).or(Err(Self::desired()))?;
+        let mut parts = split_to_parts(s, 4).or(Err(Self::parse_error()))?;
 
         let w = parts.next().unwrap();
         let h = parts.next().unwrap();
         let x = parts.next().unwrap();
         let y = parts.next().unwrap();
 
-        let w = w.parse().or(Err(Self::desired()))?;
-        let h = h.parse().or(Err(Self::desired()))?;
-        let x = x.parse().or(Err(Self::desired()))?;
-        let y = y.parse().or(Err(Self::desired()))?;
+        let w = w.parse().or(Err(Self::parse_error()))?;
+        let h = h.parse().or(Err(Self::parse_error()))?;
+        let x = x.parse().or(Err(Self::parse_error()))?;
+        let y = y.parse().or(Err(Self::parse_error()))?;
 
         Ok(Self::new(w, h, x, y))
     }
@@ -208,18 +261,18 @@ impl BdfValue for FontSize {
 }
 
 impl FromStr for FontSize {
-    type Err = &'static str;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = split_to_parts(s, 3).or(Err(Self::desired()))?;
+        let mut parts = split_to_parts(s, 3).or(Err(Self::parse_error()))?;
 
         let p = parts.next().unwrap();
         let x = parts.next().unwrap();
         let y = parts.next().unwrap();
 
-        let p = p.parse().or(Err(Self::desired()))?;
-        let x = x.parse().or(Err(Self::desired()))?;
-        let y = y.parse().or(Err(Self::desired()))?;
+        let p = p.parse().or(Err(Self::parse_error()))?;
+        let x = x.parse().or(Err(Self::parse_error()))?;
+        let y = y.parse().or(Err(Self::parse_error()))?;
 
         Ok(Self::new(p, x, y))
     }
@@ -250,17 +303,17 @@ impl BdfValue for PropertyValue {
 }
 
 impl FromStr for PropertyValue {
-    type Err = &'static str;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.starts_with('"') {
             let string = match (&s[1..]).rfind('"') {
                 Some(n) => s[1..n].replace("\"\"", "\""),
-                None    => return Err(Self::desired()),
+                None    => return Err(Self::parse_error()),
             };
             Ok(PropertyValue::Str(string))
         } else {
-            let i = s.parse().or(Err(Self::desired()))?;
+            let i = s.parse().or(Err(Self::parse_error()))?;
             Ok(PropertyValue::Int(i))
         }
     }
@@ -301,18 +354,18 @@ impl BdfValue for BitmapRow {
 }
 
 impl FromStr for BitmapRow {
-    type Err = &'static str;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.len() % 2 != 0 {
-            return Err(Self::desired());
+            return Err(Self::parse_error());
         }
 
         let mut buf: Vec<u8> = Vec::new();
         buf.reserve(s.len() / 2);
 
         for i in 0..(s.len() / 2) {
-            buf.push(u8::from_str_radix(&s[i..=(i+1)], 16).or_else(|_| Err(Self::desired()))?);
+            buf.push(u8::from_str_radix(&s[i..=(i+1)], 16).or_else(|_| Err(Self::parse_error()))?);
         }
 
         Ok(Self(BitVec::from_bytes(&buf)))
@@ -400,15 +453,38 @@ pub struct Glyph {
     pub bitmap: Bitmap,
 
     pub metrics: MetricsSet,
-
     pub scalable_width: Option<XYPair>,
     pub device_width: Option<XYPair>,
     pub scalable_width_alt: Option<XYPair>,
     pub device_width_alt: Option<XYPair>,
+
     pub vector: Option<XYPair>,
 }
 
-impl BdfBlock for Glyph {}
+impl BdfBlock for Glyph {
+    fn verify(&self) -> Result<(), Error> {
+        self.bitmap.verify()?;
+
+        let codepoint = self.codepoint;
+
+        match self.metrics {
+            MetricsSet::Normal => {
+                if !(self.scalable_width_alt.is_none() &&
+                     self.device_width_alt.is_none()) {
+                    return Err(Error::GlyphValidation(codepoint, "glyph with normal metrics cannot have alternate widths"));
+                }
+            }
+            _ => {
+                if !(self.scalable_width_alt.is_some() &&
+                     self.device_width_alt.is_some()) {
+                    return Err(Error::GlyphValidation(codepoint, "glyph with alternate metrics must have alternate widths"));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
 
 impl<'a> fmt::Display for ForBdf<'a, Glyph> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -435,7 +511,7 @@ impl<'a> fmt::Display for ForBdf<'a, Glyph> {
         if let &Some(pair) = &glyph.vector {
             write!(f, "{} {}\n", ids::VVECTOR, pair.for_bdf())?;
         }
-        write!(f, "{}", glyph.bitmap.for_bdf())?;
+        write!(f, "{}", glyph.bitmap.for_bdf().unwrap())?;
         write!(f, "{}\n", ids::ENDCHAR)
     }
 }
@@ -487,7 +563,34 @@ pub struct Font {
     pub vector: Option<XYPair>,
 }
 
-impl BdfBlock for Font {}
+impl BdfBlock for Font {
+    fn verify(&self) -> Result<(), Error> {
+        for g in &self.glyphs {
+            g.verify()?;
+        }
+
+        for p in &self.properties {
+            p.verify()?;
+        }
+
+        match self.metrics {
+            MetricsSet::Normal => {
+                if !(self.scalable_width_alt.is_none() &&
+                     self.device_width_alt.is_none()) {
+                    return Err(Error::FontValidation("font with normal metrics cannot have alternate widths"));
+                }
+            }
+            _ => {
+                if !(self.scalable_width_alt.is_some() &&
+                     self.device_width_alt.is_some()) {
+                    return Err(Error::FontValidation("font with alternate metrics must have alternate widths"));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
 
 impl<'a> fmt::Display for ForBdf<'a, Font> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -524,14 +627,14 @@ impl<'a> fmt::Display for ForBdf<'a, Font> {
         if font.properties.len() > 0 {
             write!(f, "{} {}\n", ids::STARTPROPERTIES, font.properties.len())?;
             for property in &font.properties {
-                write!(f, "{}", property.for_bdf())?;
+                write!(f, "{}", property.for_bdf().unwrap())?;
             }
             write!(f, "{}\n", ids::ENDPROPERTIES)?;
         }
         if font.glyphs.len() > 0 {
             write!(f, "{} {}\n", ids::CHARS, font.glyphs.len())?;
             for glyph in &font.glyphs {
-                write!(f, "{}", glyph.for_bdf())?;
+                write!(f, "{}", glyph.for_bdf().unwrap())?;
             }
         }
         write!(f, "{}\n", ids::ENDFONT)
@@ -539,6 +642,8 @@ impl<'a> fmt::Display for ForBdf<'a, Font> {
 }
 
 //
+
+// TODO shell trait? not really necessary i think
 
 #[derive(Clone, Debug)]
 struct BitmapShell {
@@ -775,12 +880,13 @@ impl<'a> FontShell<'a> {
             }
         }
 
-        let _ = self.glyphs.iter()
-                           .map(GlyphShell::verify)
-                           .collect::<Result<Vec<_>, _>>()?;
-        let _ = self.properties.iter()
-                               .map(PropertyShell::verify)
-                               .collect::<Result<Vec<_>, _>>()?;
+        for g in &self.glyphs {
+            g.verify()?;
+        }
+
+        for p in &self.properties {
+            p.verify()?;
+        }
 
         Ok(())
     }
@@ -821,46 +927,6 @@ impl<'a> FontShell<'a> {
 
 //
 
-mod ids {
-    pub const COMMENT: &str = "COMMENT";
-
-    pub const STARTFONT: &str = "STARTFONT";
-    pub const CONTENTVERSION: &str = "CONTENTVERSION";
-    pub const FONT: &str = "FONT";
-    pub const FONTBOUNDINGBOX: &str = "FONTBOUNDINGBOX";
-    pub const METRICSSET: &str = "METRICSSET";
-    pub const SIZE: &str = "SIZE";
-    pub const SWIDTH: &str = "SWIDTH";
-    pub const DWIDTH: &str = "DWIDTH";
-    pub const SWIDTH1: &str = "SWIDTH1";
-    pub const DWIDTH1: &str = "DWIDTH1";
-    pub const VVECTOR: &str = "VVECTOR";
-    pub const CHARS: &str = "CHARS";
-    pub const ENDFONT: &str = "ENDFONT";
-
-    pub const STARTPROPERTIES: &str = "STARTPROPERTIES";
-    pub const ENDPROPERTIES: &str = "ENDPROPERTIES";
-
-    pub const STARTCHAR: &str = "STARTCHAR";
-    pub const ENCODING: &str = "ENCODING";
-    pub const BBX: &str = "BBX";
-    pub const BITMAP: &str = "BITMAP";
-    pub const ENDCHAR: &str = "ENDCHAR";
-}
-
-#[derive(Debug)]
-pub enum Error {
-    MissingValue(String),
-    UnexpectedEntry(String),
-    MissingBoundingBox,
-    InvalidCodepoint(u32),
-    ParseError(&'static str),
-    SpecialEncoding,
-
-    FontValidation(&'static str),
-    GlyphValidation(char, &'static str),
-}
-
 pub fn parse_font(input: &str) -> Result<Font, (usize, Error)> {
     use Error::*;
 
@@ -876,12 +942,11 @@ pub fn parse_font(input: &str) -> Result<Font, (usize, Error)> {
 
     let mut state = ParseState::Empty;
 
-    let mut bitmap_len: u32 = 0;
-
+    let mut f_shell = FontShell::new();
     let mut main_bbox: Option<BoundingBox> = None;
     let mut curr_bbox: Option<BoundingBox> = None;
 
-    let mut f_shell = FontShell::new();
+    let mut bitmap_len: u32 = 0;
 
     let lines = input.trim().split('\n');
     let lines_ct = lines.clone().count();
@@ -904,7 +969,7 @@ pub fn parse_font(input: &str) -> Result<Font, (usize, Error)> {
             } else {
                 match (id, rest) {
                     (val, None) => {
-                        let row = val.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        let row = val.parse().or_else(|e| Err((line_num, e)))?;
 
                         let g_shell = f_shell.glyphs.last_mut().unwrap();
                         g_shell.bitmap.data.push(row);
@@ -913,7 +978,7 @@ pub fn parse_font(input: &str) -> Result<Font, (usize, Error)> {
                         continue;
                     }
                     (_, Some(_)) => {
-                        return Err((line_num, ParseError(BitmapRow::desired())));
+                        return Err((line_num, BitmapRow::parse_error()));
                     }
                 }
             }
@@ -988,36 +1053,36 @@ pub fn parse_font(input: &str) -> Result<Font, (usize, Error)> {
                     f_shell.content_version = Some(val);
                 },
                 ids::SIZE => {
-                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                     f_shell.size = Some(val);
                 },
                 ids::FONTBOUNDINGBOX => {
-                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                     f_shell.bounding_box = Some(val);
                     main_bbox = Some(val);
                 },
                 ids::METRICSSET => {
-                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                     f_shell.metrics = Some(val);
                 },
                 ids::SWIDTH => {
-                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                     f_shell.scalable_width = Some(val);
                 },
                 ids::DWIDTH => {
-                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                     f_shell.device_width = Some(val);
                 },
                 ids::SWIDTH1 => {
-                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                     f_shell.scalable_width_alt = Some(val);
                 },
                 ids::DWIDTH1 => {
-                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                     f_shell.device_width_alt = Some(val);
                 },
                 ids::VVECTOR => {
-                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                     f_shell.vector = Some(val);
                 },
                 ids::STARTPROPERTIES => {
@@ -1039,12 +1104,12 @@ pub fn parse_font(input: &str) -> Result<Font, (usize, Error)> {
                     if rest.ends_with('"') {
                         f_shell.properties.push(PropertyShell::new(id, Str(&rest[1..(rest.len()-1)])));
                     } else {
-                        return Err((line_num, ParseError(PropertyValue::desired())));
+                        return Err((line_num, PropertyValue::parse_error()));
                     }
                 } else {
                     match rest.parse() {
                         Ok(i) => f_shell.properties.push(PropertyShell::new(id, Int(i))),
-                        Err(_) => return Err((line_num, ParseError(PropertyValue::desired()))),
+                        Err(_) => return Err((line_num, PropertyValue::parse_error())),
                     };
                 }
             }
@@ -1081,31 +1146,31 @@ pub fn parse_font(input: &str) -> Result<Font, (usize, Error)> {
                         };
                     },
                     ids::METRICSSET => {
-                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                         g_shell.metrics = Some(val);
                     },
                     ids::SWIDTH => {
-                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                         g_shell.scalable_width = Some(val);
                     },
                     ids::DWIDTH => {
-                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                         g_shell.device_width = Some(val);
                     },
                     ids::SWIDTH1 => {
-                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                         g_shell.scalable_width_alt = Some(val);
                     },
                     ids::DWIDTH1 => {
-                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                         g_shell.device_width_alt = Some(val);
                     },
                     ids::VVECTOR => {
-                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                         g_shell.vector = Some(val);
                     },
                     ids::BBX => {
-                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        let val = rest.parse().or_else(|e| Err((line_num, e)))?;
                         g_shell.bounding_box = Some(val);
                         curr_bbox = Some(val);
                     },

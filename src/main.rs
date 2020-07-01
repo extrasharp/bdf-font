@@ -15,7 +15,7 @@ fn main() -> io::Result<()> {
     let fnt = bdf::parse_font(&contents);
     println!("{:#?}", fnt);
 
-    let read = fnt.unwrap().for_bdf().to_string();
+    let read = fnt.unwrap().for_bdf().unwrap().to_string();
     let fnt = bdf::parse_font(&read);
     println!("{:#?}", fnt);
 
