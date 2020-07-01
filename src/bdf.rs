@@ -90,28 +90,27 @@ impl<'a> fmt::Display for ForBdf<'a, XYPair> {
 
 //
 
-// TODO rename to metricsset
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
-pub enum WritingMetrics {
+pub enum MetricsSet {
     Normal = 0,
     Alternate,
     Both,
 }
 
-impl BdfValue for WritingMetrics {
+impl BdfValue for MetricsSet {
     fn desired() -> &'static str {
         "N:integer(0, 1 or 2)"
     }
 }
 
-impl FromStr for WritingMetrics {
+impl FromStr for MetricsSet {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let wm = match s.parse() {
-            Ok(0) => WritingMetrics::Normal,
-            Ok(1) => WritingMetrics::Alternate,
-            Ok(2) => WritingMetrics::Both,
+            Ok(0) => MetricsSet::Normal,
+            Ok(1) => MetricsSet::Alternate,
+            Ok(2) => MetricsSet::Both,
             _ => return Err(Self::desired()),
         };
 
@@ -119,7 +118,7 @@ impl FromStr for WritingMetrics {
     }
 }
 
-impl<'a> fmt::Display for ForBdf<'a, WritingMetrics> {
+impl<'a> fmt::Display for ForBdf<'a, MetricsSet> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", *self.0 as u8)
     }
@@ -246,7 +245,7 @@ pub enum PropertyValue {
 
 impl BdfValue for PropertyValue {
     fn desired() -> &'static str {
-        "\"string\"|i:integer"
+        "s:\"string\"|i:integer"
     }
 }
 
@@ -393,8 +392,6 @@ impl<'a> fmt::Display for ForBdf<'a, Bitmap> {
 
 //
 
-// TODO handle encoding with two integers
-//      enum Encoding Standard(char) Other(u32)
 #[derive(Debug)]
 pub struct Glyph {
     pub name: String,
@@ -402,7 +399,7 @@ pub struct Glyph {
     pub bounding_box: BoundingBox,
     pub bitmap: Bitmap,
 
-    pub metrics: WritingMetrics,
+    pub metrics: MetricsSet,
 
     pub scalable_width: Option<XYPair>,
     pub device_width: Option<XYPair>,
@@ -420,7 +417,7 @@ impl<'a> fmt::Display for ForBdf<'a, Glyph> {
         write!(f, "{} {}\n", ids::STARTCHAR, glyph.name)?;
         write!(f, "{} {}\n", ids::ENCODING, glyph.codepoint as u32)?;
         write!(f, "{} {}\n", ids::BBX, glyph.bounding_box.for_bdf())?;
-        if glyph.metrics != WritingMetrics::Normal {
+        if glyph.metrics != MetricsSet::Normal {
             write!(f, "{} {}\n", ids::METRICSSET, glyph.metrics.for_bdf())?;
         }
         if let &Some(pair) = &glyph.scalable_width {
@@ -476,7 +473,7 @@ pub struct Font {
     pub name: String,
     pub size: FontSize,
     pub bounding_box: BoundingBox,
-    pub metrics: WritingMetrics,
+    pub metrics: MetricsSet,
 
     pub comments: Vec<String>,
     pub properties: Vec<Property>,
@@ -506,7 +503,7 @@ impl<'a> fmt::Display for ForBdf<'a, Font> {
         }
         write!(f, "{} {}\n", ids::SIZE, font.size.for_bdf())?;
         write!(f, "{} {}\n", ids::FONTBOUNDINGBOX, font.bounding_box.for_bdf())?;
-        if font.metrics != WritingMetrics::Normal {
+        if font.metrics != MetricsSet::Normal {
             write!(f, "{} {}\n", ids::METRICSSET, font.metrics.for_bdf())?;
         }
         if let &Some(pair) = &font.scalable_width {
@@ -559,7 +556,13 @@ impl BitmapShell {
         }
     }
 
+    fn verify(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
     fn to_bitmap(self) -> Result<Bitmap, Error> {
+        self.verify()?;
+
         Ok(Bitmap {
             width: self.width,
             height: self.height,
@@ -575,7 +578,7 @@ struct GlyphShell<'a> {
     pub bounding_box: Option<BoundingBox>,
     pub bitmap: BitmapShell,
 
-    pub metrics: Option<WritingMetrics>,
+    pub metrics: Option<MetricsSet>,
 
     pub scalable_width: Option<XYPair>,
     pub device_width: Option<XYPair>,
@@ -600,7 +603,7 @@ impl<'a> GlyphShell<'a> {
         }
     }
 
-    fn to_glyph(self) -> Result<Glyph, Error> {
+    fn verify(&self) -> Result<(), Error> {
         use Error::*;
 
         if self.codepoint.is_none() {
@@ -616,34 +619,38 @@ impl<'a> GlyphShell<'a> {
         }
 
         match self.metrics {
-            None | Some(WritingMetrics::Normal) => {
+            None | Some(MetricsSet::Normal) => {
                 if !(self.scalable_width_alt.is_none() &&
                      self.device_width_alt.is_none()) {
-                    // TODO
-                    return Err(GlyphValidation(codepoint, ""));
+                    return Err(GlyphValidation(codepoint, "glyph with normal metrics cannot have alternate widths"));
                 }
             }
             Some(_) => {
                 if !(self.scalable_width_alt.is_some() &&
                      self.device_width_alt.is_some()) {
-                    // TODO
-                    return Err(GlyphValidation(codepoint, ""));
+                    return Err(GlyphValidation(codepoint, "glyph with alternate metrics must have alternate widths"));
                 }
             }
         }
 
-        let bitmap = match self.bitmap.to_bitmap() {
-            Ok(b) => b,
-            Err(BitmapInvalidRow) => return Err(GlyphValidation(codepoint, "bitmap contains invalid row")),
-            Err(_) => unreachable!(),
-        };
+        self.bitmap.verify()?;
+
+        Ok(())
+    }
+
+    fn to_glyph(self) -> Result<Glyph, Error> {
+        self.verify()?;
+
+        let codepoint = self.codepoint.unwrap();
+        let bitmap = self.bitmap.to_bitmap()?;
 
         Ok(Glyph {
             name: String::from(self.name.unwrap()),
             codepoint,
             bounding_box: self.bounding_box.unwrap(),
             bitmap,
-            metrics: self.metrics.unwrap_or(WritingMetrics::Normal),
+            metrics: self.metrics.unwrap_or(MetricsSet::Normal),
+
             scalable_width: self.scalable_width,
             device_width: self.device_width,
             scalable_width_alt: self.scalable_width_alt,
@@ -660,9 +667,14 @@ enum PropertyValueShell<'a> {
 }
 
 impl<'a> PropertyValueShell<'a> {
+    fn verify(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
     fn to_property_value(self) -> Result<PropertyValue, Error> {
+        self.verify()?;
         Ok(match self {
-            Self::Str(s) => PropertyValue::Str(String::from(s)),
+            Self::Str(s) => PropertyValue::Str(s.replace("\"\"", "\"")),
             Self::Int(i) => PropertyValue::Int(i),
         })
     }
@@ -682,10 +694,15 @@ impl<'a> PropertyShell<'a> {
         }
     }
 
+    fn verify(&self) -> Result<(), Error> {
+        self.value.verify()
+    }
+
     fn to_property(self) -> Result<Property, Error> {
+        self.verify()?;
         Ok(Property {
             name: String::from(self.name),
-            value: self.value.to_property_value().unwrap(),
+            value: self.value.to_property_value()?,
         })
     }
 }
@@ -696,7 +713,7 @@ struct FontShell<'a> {
     pub name: Option<&'a str>,
     pub size: Option<FontSize>,
     pub bounding_box: Option<BoundingBox>,
-    pub metrics: Option<WritingMetrics>,
+    pub metrics: Option<MetricsSet>,
 
     pub comments: Vec<&'a str>,
     pub properties: Vec<PropertyShell<'a>>,
@@ -730,7 +747,7 @@ impl<'a> FontShell<'a> {
         }
     }
 
-    fn to_font(self) -> Result<Font, Error> {
+    fn verify(&self) -> Result<(), Error> {
         use Error::*;
 
         if self.bdf_version.is_none() {
@@ -744,21 +761,32 @@ impl<'a> FontShell<'a> {
         }
 
         match self.metrics {
-            None | Some(WritingMetrics::Normal) => {
+            None | Some(MetricsSet::Normal) => {
                 if !(self.scalable_width_alt.is_none() &&
                      self.device_width_alt.is_none()) {
-                    // TODO
-                    return Err(FontValidation(""));
+                    return Err(FontValidation("font with normal metrics cannot have alternate widths"));
                 }
             }
             Some(_) => {
                 if !(self.scalable_width_alt.is_some() &&
                      self.device_width_alt.is_some()) {
-                    // TODO
-                    return Err(FontValidation(""));
+                    return Err(FontValidation("font with alternate metrics must have alternate widths"));
                 }
             }
         }
+
+        let _ = self.glyphs.iter()
+                           .map(GlyphShell::verify)
+                           .collect::<Result<Vec<_>, _>>()?;
+        let _ = self.properties.iter()
+                               .map(PropertyShell::verify)
+                               .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(())
+    }
+
+    fn to_font(self) -> Result<Font, Error> {
+        self.verify()?;
 
         let glyphs = self.glyphs.into_iter()
                                 .map(GlyphShell::to_glyph)
@@ -775,7 +803,7 @@ impl<'a> FontShell<'a> {
             name: String::from(self.name.unwrap()),
             size: self.size.unwrap(),
             bounding_box: self.bounding_box.unwrap(),
-            metrics: self.metrics.unwrap_or(WritingMetrics::Normal),
+            metrics: self.metrics.unwrap_or(MetricsSet::Normal),
 
             comments,
             properties,
@@ -822,271 +850,274 @@ mod ids {
 
 #[derive(Debug)]
 pub enum Error {
-    MissingValue(usize, String),
-    UnexpectedEntry(usize, String),
-    MissingBoundingBox(usize),
-    InvalidCodepoint(usize, u32),
-    ParseError(usize, &'static str),
-    BitmapInvalidRow,
+    MissingValue(String),
+    UnexpectedEntry(String),
+    MissingBoundingBox,
+    InvalidCodepoint(u32),
+    ParseError(&'static str),
+    SpecialEncoding,
+
     FontValidation(&'static str),
     GlyphValidation(char, &'static str),
 }
 
-pub struct Parser;
+pub fn parse_font(input: &str) -> Result<Font, (usize, Error)> {
+    use Error::*;
 
-impl Parser {
-    pub fn new() -> Self {
-        Parser
+    #[derive(Eq, PartialEq, Copy, Clone)]
+    enum ParseState {
+        Empty,
+        InFont,
+        InProperties,
+        InChars,
+        InChar,
+        InBitmap,
     }
 
-    pub fn parse(input: &str) -> Result<Font, Error> {
-        use Error::*;
+    let mut state = ParseState::Empty;
 
-        #[derive(Eq, PartialEq, Copy, Clone)]
-        enum ParseState {
-            Empty,
-            InFont,
-            InProperties,
-            InChars,
-            InChar,
-            InBitmap,
+    let mut bitmap_len: u32 = 0;
+
+    let mut main_bbox: Option<BoundingBox> = None;
+    let mut curr_bbox: Option<BoundingBox> = None;
+
+    let mut f_shell = FontShell::new();
+
+    let lines = input.trim().split('\n');
+    let lines_ct = lines.clone().count();
+    for (line_num, long_line) in lines.enumerate() {
+        if long_line.chars().all(char::is_whitespace) {
+            continue;
         }
 
-        let mut state = ParseState::Empty;
+        let line_num = line_num + 1;
+        let line = long_line.trim();
 
-        let mut properties_ct: usize = 0;
-        let mut glyphs_ct: usize = 0;
-        let mut bitmap_len: u32 = 0;
+        let (id, rest) = match line.find(char::is_whitespace) {
+            Some(n) => (&line[0..n], Some((&line[n..]).trim())),
+            None    => (line, None),
+        };
 
-        let mut main_bbox: Option<BoundingBox> = None;
-        let mut curr_bbox: Option<BoundingBox> = None;
+        if state == ParseState::InBitmap {
+            if bitmap_len == 0 {
+                state = ParseState::InChar;
+            } else {
+                match (id, rest) {
+                    (val, None) => {
+                        let row = val.parse().or_else(|e| Err((line_num, ParseError(e))))?;
 
-        let mut f_shell = FontShell::new();
+                        let g_shell = f_shell.glyphs.last_mut().unwrap();
+                        g_shell.bitmap.data.push(row);
 
-        // TODO handle empty line
-        let lines = input.trim().split('\n');
-        let lines_ct = lines.clone().count();
-        for (line_num, long_line) in lines.enumerate() {
-            let line_num = line_num + 1;
-
-            let line = long_line.trim();
-            let (id, rest) = match line.find(char::is_whitespace) {
-                Some(n) => (&line[0..n], Some((&line[n..]).trim())),
-                None    => (line, None),
-            };
-
-            if state == ParseState::InBitmap {
-                if bitmap_len == 0 {
-                    state = ParseState::InChar;
-                } else {
-                    match (id, rest) {
-                        (val, None) => {
-                            // TODO verify row width
-                            //   cant really this because of the way things are padded
-                            //   you could at least make sure with doesnt exceed how much data you have
-                            let row = val.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-
-                            let g_shell = f_shell.glyphs.last_mut().unwrap();
-                            g_shell.bitmap.data.push(row);
-                            bitmap_len -= 1;
-                            continue;
-                        }
-                        (_, Some(_)) => {
-                            return Err(ParseError(line_num, BitmapRow::desired()));
-                        }
+                        bitmap_len -= 1;
+                        continue;
+                    }
+                    (_, Some(_)) => {
+                        return Err((line_num, ParseError(BitmapRow::desired())));
                     }
                 }
             }
+        }
 
-            match (state, id, rest) {
-                (_, ids::COMMENT, Some(s)) => {
-                    f_shell.comments.push(s);
-                    continue;
-                },
+        match (state, id, rest) {
+            (_, ids::COMMENT, Some(s)) => {
+                f_shell.comments.push(s);
+                continue;
+            },
 
-                (ParseState::InChars, ids::ENDFONT, _) => {
-                    // TODO check char ct
-                    break;
-                },
-                (_, id @ ids::ENDFONT, _) => return Err(UnexpectedEntry(line_num, String::from(id))),
-
-                (ParseState::InProperties, ids::ENDPROPERTIES, _) => {
-                    // TODO check properties len
-                    state = ParseState::InFont;
-                    continue;
-                },
-                (_, id @ ids::ENDPROPERTIES, _) => return Err(UnexpectedEntry(line_num, String::from(id))),
-
-                (ParseState::InChar, ids::ENDCHAR, _) => {
-                    // TODO verify glyph here?
-                    state = ParseState::InChars;
-                    continue;
-                },
-                (ParseState::InChar, ids::BITMAP, _) => {
-                    let bbox = match (&main_bbox, &curr_bbox) {
-                        (_, Some(bbox)) | (Some(bbox), None) => bbox,
-                        (None, None) => return Err(MissingBoundingBox(line_num)),
-                    };
-
-                    let g_shell = f_shell.glyphs.last_mut().unwrap();
-                    g_shell.bitmap.width = bbox.width as usize;
-                    g_shell.bitmap.height = bbox.height as usize;
-
-                    bitmap_len = bbox.height;
-                    state = ParseState::InBitmap;
-                    continue;
-                },
-                (_, id @ ids::ENDCHAR, _) => return Err(UnexpectedEntry(line_num, String::from(id))),
-
-                (_, id, None) => return Err(MissingValue(line_num, String::from(id))),
-                (_, _, Some(_)) => {}
-            }
-
-            let rest = rest.unwrap();
-
-            match state {
-                ParseState::Empty => match id {
-                    ids::STARTFONT => {
-                        f_shell.bdf_version = Some(rest);
-                        state = ParseState::InFont;
-                    },
-                    id => return Err(UnexpectedEntry(line_num, String::from(id))),
+            (ParseState::InChars, id @ ids::ENDFONT, _) => {
+                if line_num != lines_ct {
+                    return Err((line_num, UnexpectedEntry(String::from(id))));
                 }
-                ParseState::InFont => match id {
-                    ids::FONT => {
-                        f_shell.name = Some(rest);
-                    },
-                    ids::CONTENTVERSION => {
-                        let val = rest.parse().or_else(|_| Err(ParseError(line_num, "integer")))?;
-                        f_shell.content_version = Some(val);
-                    },
-                    ids::SIZE => {
-                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                        f_shell.size = Some(val);
-                    },
-                    ids::FONTBOUNDINGBOX => {
-                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                        f_shell.bounding_box = Some(val);
-                        main_bbox = Some(val);
+                break;
+            },
+            (_, id @ ids::ENDFONT, _) => return Err((line_num, UnexpectedEntry(String::from(id)))),
+
+            (ParseState::InProperties, ids::ENDPROPERTIES, _) => {
+                state = ParseState::InFont;
+                continue;
+            },
+            (_, id @ ids::ENDPROPERTIES, _) => return Err((line_num, UnexpectedEntry(String::from(id)))),
+
+            (ParseState::InChar, ids::ENDCHAR, _) => {
+                let g_shell = f_shell.glyphs.last_mut().unwrap();
+                match g_shell.verify() {
+                    Ok(()) => {},
+                    Err(err) => return Err((line_num, err)),
+                }
+                state = ParseState::InChars;
+                continue;
+            },
+            (ParseState::InChar, ids::BITMAP, _) => {
+                let bbox = match (&main_bbox, &curr_bbox) {
+                    (_, Some(bbox)) | (Some(bbox), None) => bbox,
+                    (None, None) => return Err((line_num, MissingBoundingBox)),
+                };
+
+                let g_shell = f_shell.glyphs.last_mut().unwrap();
+                g_shell.bitmap.width = bbox.width as usize;
+                g_shell.bitmap.height = bbox.height as usize;
+                g_shell.bitmap.data.reserve(bbox.height as usize);
+
+                bitmap_len = bbox.height;
+                state = ParseState::InBitmap;
+                continue;
+            },
+            (_, id @ ids::ENDCHAR, _) => return Err((line_num, UnexpectedEntry(String::from(id)))),
+
+            (_, id, None) => return Err((line_num, MissingValue(String::from(id)))),
+            (_, _, Some(_)) => {}
+        }
+
+        let rest = rest.unwrap();
+
+        match state {
+            ParseState::Empty => match id {
+                ids::STARTFONT => {
+                    f_shell.bdf_version = Some(rest);
+                    state = ParseState::InFont;
+                },
+                id => return Err((line_num, UnexpectedEntry(String::from(id)))),
+            }
+            ParseState::InFont => match id {
+                ids::FONT => {
+                    f_shell.name = Some(rest);
+                },
+                ids::CONTENTVERSION => {
+                    let val = rest.parse().or_else(|_| Err((line_num, ParseError("integer"))))?;
+                    f_shell.content_version = Some(val);
+                },
+                ids::SIZE => {
+                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    f_shell.size = Some(val);
+                },
+                ids::FONTBOUNDINGBOX => {
+                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    f_shell.bounding_box = Some(val);
+                    main_bbox = Some(val);
+                },
+                ids::METRICSSET => {
+                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    f_shell.metrics = Some(val);
+                },
+                ids::SWIDTH => {
+                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    f_shell.scalable_width = Some(val);
+                },
+                ids::DWIDTH => {
+                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    f_shell.device_width = Some(val);
+                },
+                ids::SWIDTH1 => {
+                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    f_shell.scalable_width_alt = Some(val);
+                },
+                ids::DWIDTH1 => {
+                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    f_shell.device_width_alt = Some(val);
+                },
+                ids::VVECTOR => {
+                    let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                    f_shell.vector = Some(val);
+                },
+                ids::STARTPROPERTIES => {
+                    let val = rest.parse().or_else(|_| Err((line_num, ParseError("integer"))))?;
+                    f_shell.properties.reserve(val);
+                    state = ParseState::InProperties;
+                }
+                ids::CHARS => {
+                    let val = rest.parse().or_else(|_| Err((line_num, ParseError("integer"))))?;
+                    f_shell.glyphs.reserve(val);
+                    state = ParseState::InChars;
+                },
+                id => return Err((line_num, UnexpectedEntry(String::from(id)))),
+            }
+            ParseState::InProperties => {
+                use PropertyValueShell::*;
+
+                if rest.starts_with('"') {
+                    if rest.ends_with('"') {
+                        f_shell.properties.push(PropertyShell::new(id, Str(&rest[1..(rest.len()-1)])));
+                    } else {
+                        return Err((line_num, ParseError(PropertyValue::desired())));
+                    }
+                } else {
+                    match rest.parse() {
+                        Ok(i) => f_shell.properties.push(PropertyShell::new(id, Int(i))),
+                        Err(_) => return Err((line_num, ParseError(PropertyValue::desired()))),
+                    };
+                }
+            }
+            ParseState::InChars => match id {
+                ids::STARTCHAR => {
+                    f_shell.glyphs.push(GlyphShell::new());
+                    let g_shell = f_shell.glyphs.last_mut().unwrap();
+                    g_shell.name = Some(rest);
+                    state = ParseState::InChar;
+                }
+                id => return Err((line_num, UnexpectedEntry(String::from(id)))),
+            },
+            ParseState::InChar => {
+                let g_shell = f_shell.glyphs.last_mut().unwrap();
+
+                match id {
+                    ids::ENCODING => {
+                        match rest.find(char::is_whitespace) {
+                            Some(n) => match &rest[0..n].parse::<i64>() {
+                                Ok(-1) => return Err((line_num, SpecialEncoding)),
+                                _ => return Err((line_num, ParseError("-1 integer"))),
+                            },
+                            None => {}
+                        }
+
+                        match rest.parse::<u32>() {
+                            Ok(u) => {
+                                match char::try_from(u) {
+                                    Ok(c) => g_shell.codepoint = Some(c),
+                                    Err(_) => return Err((line_num, InvalidCodepoint(u))),
+                                }
+                            }
+                            Err(_) => return Err((line_num, ParseError("integer"))),
+                        };
                     },
                     ids::METRICSSET => {
-                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                        f_shell.metrics = Some(val);
+                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        g_shell.metrics = Some(val);
                     },
                     ids::SWIDTH => {
-                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                        f_shell.scalable_width = Some(val);
+                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        g_shell.scalable_width = Some(val);
                     },
                     ids::DWIDTH => {
-                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                        f_shell.device_width = Some(val);
+                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        g_shell.device_width = Some(val);
                     },
                     ids::SWIDTH1 => {
-                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                        f_shell.scalable_width_alt = Some(val);
+                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        g_shell.scalable_width_alt = Some(val);
                     },
                     ids::DWIDTH1 => {
-                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                        f_shell.device_width_alt = Some(val);
+                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        g_shell.device_width_alt = Some(val);
                     },
                     ids::VVECTOR => {
-                        let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                        f_shell.vector = Some(val);
+                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        g_shell.vector = Some(val);
                     },
-                    ids::STARTPROPERTIES => {
-                        let val = rest.parse().or_else(|_| Err(ParseError(line_num, "integer")))?;
-                        properties_ct = val;
-                        state = ParseState::InProperties;
-                    }
-                    ids::CHARS => {
-                        let val = rest.parse().or_else(|_| Err(ParseError(line_num, "integer")))?;
-                        glyphs_ct = val;
-                        state = ParseState::InChars;
+                    ids::BBX => {
+                        let val = rest.parse().or_else(|e| Err((line_num, ParseError(e))))?;
+                        g_shell.bounding_box = Some(val);
+                        curr_bbox = Some(val);
                     },
-                    id => return Err(UnexpectedEntry(line_num, String::from(id))),
-                }
-                ParseState::InProperties => {
-                    // TODO check properties len
-                    // TODO propertyvalue::from_str is never actually used
-                    use PropertyValueShell::*;
-
-                    if rest.starts_with('"') {
-                        if rest.ends_with('"') {
-                            f_shell.properties.push(PropertyShell::new(id, Str(&rest[1..(rest.len()-1)])));
-                        } else {
-                            return Err(ParseError(line_num, "\"string\""));
-                        }
-                    } else {
-                        match rest.parse() {
-                            Ok(i) => f_shell.properties.push(PropertyShell::new(id, Int(i))),
-                            Err(_) => return Err(ParseError(line_num, "integer")),
-                        };
-                    }
-                }
-                ParseState::InChars => match id {
-                    ids::STARTCHAR => {
-                        f_shell.glyphs.push(GlyphShell::new());
-                        let g_shell = f_shell.glyphs.last_mut().unwrap();
-                        g_shell.name = Some(rest);
-                        state = ParseState::InChar;
-                    }
-                    id => return Err(UnexpectedEntry(line_num, String::from(id))),
-                },
-                ParseState::InChar => {
-                    // TODO check chars len
-                    let g_shell = f_shell.glyphs.last_mut().unwrap();
-
-                    match id {
-                        ids::ENCODING => {
-                            match rest.parse::<u32>() {
-                                Ok(u) => {
-                                    match char::try_from(u) {
-                                        Ok(c) => g_shell.codepoint = Some(c),
-                                        Err(_) => return Err(InvalidCodepoint(line_num, u)),
-                                    }
-                                }
-                                Err(_) => return Err(ParseError(line_num, "u32")),
-                            };
-                        },
-                        ids::METRICSSET => {
-                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                            g_shell.metrics = Some(val);
-                        },
-                        ids::SWIDTH => {
-                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                            g_shell.scalable_width = Some(val);
-                        },
-                        ids::DWIDTH => {
-                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                            g_shell.device_width = Some(val);
-                        },
-                        ids::SWIDTH1 => {
-                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                            g_shell.scalable_width_alt = Some(val);
-                        },
-                        ids::DWIDTH1 => {
-                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                            g_shell.device_width_alt = Some(val);
-                        },
-                        ids::VVECTOR => {
-                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                            g_shell.vector = Some(val);
-                        },
-                        ids::BBX => {
-                            let val = rest.parse().or_else(|e| Err(ParseError(line_num, e)))?;
-                            g_shell.bounding_box = Some(val);
-                            curr_bbox = Some(val);
-                        },
-                        id => return Err(UnexpectedEntry(line_num, String::from(id))),
-                    }
-                }
-                ParseState::InBitmap => {
-                    // rest should be None
-                    unreachable!();
+                    id => return Err((line_num, UnexpectedEntry(String::from(id)))),
                 }
             }
+            ParseState::InBitmap => {
+                // rest should be None
+                unreachable!();
+            }
         }
-
-        f_shell.to_font()
     }
+
+    f_shell.to_font().or_else(|e| Err((lines_ct, e)))
 }
