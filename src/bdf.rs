@@ -45,7 +45,6 @@ fn split_to_parts(s: &str, n: usize) -> Result<SplitWhitespace, usize> {
 
 //
 
-// TODO handle float vs integer for scalable vs device width
 #[derive(Copy, Clone, Debug)]
 pub struct XYPair {
     pub x: u32,
@@ -92,7 +91,7 @@ impl<'a> fmt::Display for ForBdf<'a, XYPair> {
 //
 
 // TODO rename to metricsset
-#[derive(Copy, Clone, Debug)]
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum WritingMetrics {
     Normal = 0,
     Alternate,
@@ -188,7 +187,6 @@ impl<'a> fmt::Display for ForBdf<'a, BoundingBox> {
 
 #[derive(Copy, Clone, Debug)]
 pub struct FontSize {
-    // TODO i think these should be floats
     pub point_size: u32,
     pub x_dpi: u32,
     pub y_dpi: u32,
@@ -272,7 +270,6 @@ impl FromStr for PropertyValue {
 impl<'a> fmt::Display for ForBdf<'a, PropertyValue> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.0 {
-            // TODO note: dont like creating new str here
             PropertyValue::Str(s) => write!(f, "\"{}\"", s.replace("\"", "\"\"")),
             PropertyValue::Int(i) => write!(f, "{}", i),
         }
@@ -335,8 +332,6 @@ impl<'a> fmt::Display for ForBdf<'a, BitmapRow> {
 
 //
 
-// TODO use ids:: for bdfblock printing
-
 #[derive(Clone, Debug)]
 pub struct Bitmap {
     width: usize,
@@ -386,7 +381,7 @@ impl BdfBlock for Bitmap {}
 
 impl<'a> fmt::Display for ForBdf<'a, Bitmap> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BITMAP\n")?;
+        write!(f, "{}\n", ids::BITMAP)?;
 
         for row in self.0.rows() {
             write!(f, "{}\n", row.for_bdf())?;
@@ -399,6 +394,7 @@ impl<'a> fmt::Display for ForBdf<'a, Bitmap> {
 //
 
 // TODO handle encoding with two integers
+//      enum Encoding Standard(char) Other(u32)
 #[derive(Debug)]
 pub struct Glyph {
     pub name: String,
@@ -415,52 +411,35 @@ pub struct Glyph {
     pub vector: Option<XYPair>,
 }
 
-impl Glyph {
-    pub fn new(name: &str, codepoint: char, bounding_box: BoundingBox, bitmap: Bitmap) -> Self {
-        Self {
-            name: String::from(name),
-            codepoint,
-            bounding_box,
-            metrics: WritingMetrics::Normal,
-            bitmap,
-
-            scalable_width: None,
-            device_width: None,
-            scalable_width_alt: None,
-            device_width_alt: None,
-            vector: None,
-        }
-    }
-}
-
 impl BdfBlock for Glyph {}
 
 impl<'a> fmt::Display for ForBdf<'a, Glyph> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let glyph = &self.0;
 
-        write!(f, "STARTCHAR {}\n", glyph.name)?;
-        write!(f, "ENCODING {}\n", glyph.codepoint as u32)?;
-        write!(f, "BBX {}\n", glyph.bounding_box.for_bdf())?;
-        // TODO only do if metrics != normal ?
-        write!(f, "METRICSSET {}\n", glyph.metrics.for_bdf())?;
+        write!(f, "{} {}\n", ids::STARTCHAR, glyph.name)?;
+        write!(f, "{} {}\n", ids::ENCODING, glyph.codepoint as u32)?;
+        write!(f, "{} {}\n", ids::BBX, glyph.bounding_box.for_bdf())?;
+        if glyph.metrics != WritingMetrics::Normal {
+            write!(f, "{} {}\n", ids::METRICSSET, glyph.metrics.for_bdf())?;
+        }
         if let &Some(pair) = &glyph.scalable_width {
-            write!(f, "SWIDTH {}\n", pair.for_bdf())?;
+            write!(f, "{} {}\n", ids::SWIDTH, pair.for_bdf())?;
         }
         if let &Some(pair) = &glyph.device_width {
-            write!(f, "DWIDTH {}\n", pair.for_bdf())?;
+            write!(f, "{} {}\n", ids::DWIDTH, pair.for_bdf())?;
         }
         if let &Some(pair) = &glyph.scalable_width_alt {
-            write!(f, "SWIDTH1 {}\n", pair.for_bdf())?;
+            write!(f, "{} {}\n", ids::SWIDTH1, pair.for_bdf())?;
         }
         if let &Some(pair) = &glyph.device_width_alt {
-            write!(f, "DWIDTH1 {}\n", pair.for_bdf())?;
+            write!(f, "{} {}\n", ids::DWIDTH1, pair.for_bdf())?;
         }
         if let &Some(pair) = &glyph.vector {
-            write!(f, "VVECTOR {}\n", pair.for_bdf())?;
+            write!(f, "{} {}\n", ids::VVECTOR, pair.for_bdf())?;
         }
         write!(f, "{}", glyph.bitmap.for_bdf())?;
-        write!(f, "ENDCHAR\n")
+        write!(f, "{}\n", ids::ENDCHAR)
     }
 }
 
@@ -511,76 +490,54 @@ pub struct Font {
     pub vector: Option<XYPair>,
 }
 
-impl Font {
-    pub fn new(name: &str, size: FontSize, bounding_box: BoundingBox) -> Self {
-        Self {
-            bdf_version: String::from("2.2"),
-            name: String::from(name),
-            size,
-            bounding_box,
-            metrics: WritingMetrics::Normal,
-
-            comments: Vec::new(),
-            properties: Vec::new(),
-            glyphs: Vec::new(),
-
-            content_version: None,
-            scalable_width: None,
-            device_width: None,
-            scalable_width_alt: None,
-            device_width_alt: None,
-            vector: None,
-        }
-    }
-}
-
 impl BdfBlock for Font {}
 
 impl<'a> fmt::Display for ForBdf<'a, Font> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let font = &self.0;
 
-        write!(f, "STARTFONT {}\n", font.bdf_version)?;
-        write!(f, "FONT {}\n", font.name)?;
+        write!(f, "{} {}\n", ids::STARTFONT, font.bdf_version)?;
+        write!(f, "{} {}\n", ids::FONT, font.name)?;
         for comment in &font.comments {
-            write!(f, "COMMENT {}\n", comment)?;
+            write!(f, "{} {}\n", ids::COMMENT, comment)?;
         }
         if let Some(cv) = &font.content_version {
-            write!(f, "CONTENTVERSION {}\n", cv)?;
+            write!(f, "{} {}\n", ids::CONTENTVERSION, cv)?;
         }
-        write!(f, "SIZE {}\n", font.size.for_bdf())?;
-        write!(f, "FONTBOUNDINGBOX {}\n", font.bounding_box.for_bdf())?;
-        // TODO only do if metrics != normal ?
-        write!(f, "METRICSSET {}\n", font.metrics.for_bdf())?;
+        write!(f, "{} {}\n", ids::SIZE, font.size.for_bdf())?;
+        write!(f, "{} {}\n", ids::FONTBOUNDINGBOX, font.bounding_box.for_bdf())?;
+        if font.metrics != WritingMetrics::Normal {
+            write!(f, "{} {}\n", ids::METRICSSET, font.metrics.for_bdf())?;
+        }
         if let &Some(pair) = &font.scalable_width {
-            write!(f, "SWIDTH {}\n", pair.for_bdf())?;
+            write!(f, "{} {}\n", ids::SWIDTH, pair.for_bdf())?;
         }
         if let &Some(pair) = &font.device_width {
-            write!(f, "DWIDTH {}\n", pair.for_bdf())?;
+            write!(f, "{} {}\n", ids::DWIDTH, pair.for_bdf())?;
         }
         if let &Some(pair) = &font.scalable_width_alt {
-            write!(f, "SWIDTH1 {}\n", pair.for_bdf())?;
+            write!(f, "{} {}\n", ids::SWIDTH1, pair.for_bdf())?;
         }
         if let &Some(pair) = &font.device_width_alt {
-            write!(f, "DWIDTH1 {}\n", pair.for_bdf())?;
+            write!(f, "{} {}\n", ids::DWIDTH1, pair.for_bdf())?;
         }
         if let &Some(pair) = &font.vector {
-            write!(f, "VVECTOR {}\n", pair.for_bdf())?;
+            write!(f, "{} {}\n", ids::VVECTOR, pair.for_bdf())?;
         }
         if font.properties.len() > 0 {
-            write!(f, "STARTPROPERTIES {}\n", font.properties.len())?;
+            write!(f, "{} {}\n", ids::STARTPROPERTIES, font.properties.len())?;
             for property in &font.properties {
                 write!(f, "{}", property.for_bdf())?;
             }
-            write!(f, "ENDPROPERTIES\n")?;
+            write!(f, "{}\n", ids::ENDPROPERTIES)?;
         }
         if font.glyphs.len() > 0 {
-            write!(f, "CHARS {}\n", font.glyphs.len())?;
+            write!(f, "{} {}\n", ids::CHARS, font.glyphs.len())?;
             for glyph in &font.glyphs {
                 write!(f, "{}", glyph.for_bdf())?;
             }
         }
-        write!(f, "ENDFONT\n")
+        write!(f, "{}\n", ids::ENDFONT)
     }
 }
 
@@ -659,8 +616,7 @@ impl<'a> GlyphShell<'a> {
         }
 
         match self.metrics {
-            None => {}
-            Some(WritingMetrics::Normal) => {
+            None | Some(WritingMetrics::Normal) => {
                 if !(self.scalable_width_alt.is_none() &&
                      self.device_width_alt.is_none()) {
                     // TODO
@@ -788,8 +744,7 @@ impl<'a> FontShell<'a> {
         }
 
         match self.metrics {
-            None => {}
-            Some(WritingMetrics::Normal) => {
+            None | Some(WritingMetrics::Normal) => {
                 if !(self.scalable_width_alt.is_none() &&
                      self.device_width_alt.is_none()) {
                     // TODO
@@ -912,6 +867,8 @@ impl Parser {
         let lines = input.trim().split('\n');
         let lines_ct = lines.clone().count();
         for (line_num, long_line) in lines.enumerate() {
+            let line_num = line_num + 1;
+
             let line = long_line.trim();
             let (id, rest) = match line.find(char::is_whitespace) {
                 Some(n) => (&line[0..n], Some((&line[n..]).trim())),
@@ -925,7 +882,7 @@ impl Parser {
                     match (id, rest) {
                         (val, None) => {
                             // TODO verify row width
-                            //   cant really do this because of the way things are padded
+                            //   cant really this because of the way things are padded
                             //   you could at least make sure with doesnt exceed how much data you have
                             let row = val.parse().or_else(|e| Err(ParseError(line_num, e)))?;
 
@@ -949,7 +906,6 @@ impl Parser {
 
                 (ParseState::InChars, ids::ENDFONT, _) => {
                     // TODO check char ct
-                    //      verify font
                     break;
                 },
                 (_, id @ ids::ENDFONT, _) => return Err(UnexpectedEntry(line_num, String::from(id))),
@@ -962,7 +918,7 @@ impl Parser {
                 (_, id @ ids::ENDPROPERTIES, _) => return Err(UnexpectedEntry(line_num, String::from(id))),
 
                 (ParseState::InChar, ids::ENDCHAR, _) => {
-                    // TODO verify glyph?
+                    // TODO verify glyph here?
                     state = ParseState::InChars;
                     continue;
                 },
