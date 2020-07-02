@@ -3,8 +3,8 @@ use std::io;
 use std::io::prelude::*;
 
 use bdf_font::{
-    bdf,
-    bdf::BdfBlock,
+    self,
+    BdfBlock,
 };
 
 fn main() -> io::Result<()> {
@@ -12,12 +12,13 @@ fn main() -> io::Result<()> {
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
 
-    let fnt = bdf::parse_font(&contents);
+    let fnt = bdf_font::parse_font(&contents);
     println!("{:#?}", fnt);
 
     let read = fnt.unwrap().for_bdf().unwrap().to_string();
-    let fnt = bdf::parse_font(&read);
+    let fnt = bdf_font::parse_font(&read);
     println!("{:#?}", fnt);
+    println!("{}", read);
 
     Ok(())
 }

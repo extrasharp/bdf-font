@@ -2,5 +2,6 @@ bdf-font
 
 rust BDF font library
 documentation for the BDF format can be found at https://www.adobe.com/content/dam/acom/en/devnet/font/pdfs/5005.BDF_Spec.pdf
+documentation for the XLFD format can be found at https://www.x.org/archive/X11R7.6/doc/xorg-docs/specs/XLFD/xlfd.pdf
 
 MIT
